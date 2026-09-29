@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: hong-pick
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn server:app
+    healthCheckPath: /health
+    autoDeployTrigger: commit
