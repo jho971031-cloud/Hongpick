@@ -29,4 +29,3 @@ def fibonacci_history(tv):
         if len(candles)<52:raise ValueError('주봉 데이터가 부족합니다')
         return {'candles':candles,'source':source,'sourceUrl':source_url,'updated':now(),'lastBar':candles[-1]['time'],'interval':'W','range':'10y','completeWeeksOnly':True,'adjustment':'제공원 주봉 OHLCV 기준. 진행 중인 주는 제외합니다.'}
     return cached('fib-history-v1:'+tv,int(os.getenv('HONGPICK_FIB_HISTORY_TTL','86400')),load,'data-fib-history-'+tv.replace(':','-')+'.json')
-
