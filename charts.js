@@ -81,7 +81,7 @@ window.HongChart=class {
    const candidate=HongIndicators.fibonacci(this.weeklyData?.candles||[],this.options.fib);this.fibCandidate=candidate;
    if(candidate){
     const palette={0:'#92989f',.5:'#52bd58',1:'#ff515b',1.5:'#00a98d',2:'#ffad16',2.5:'#00bdd9',3:'#92989f'},start=0;
-    for(const [ratio,color] of Object.entries(palette)){const r=Number(ratio),data=[];for(let i=start;i<this.data.candles.length;i++){const value=channelPrice(candidate,this.weeklyData.candles,this.data.candles[i].time,r);if(Number.isFinite(value)&&value>0)data.push({time:this.data.candles[i].time,value})}add(data,color,0,{lineWidth:r===0||r===1?2:1,lastValueVisible:true,title:String(r)})}
+    for(const [ratio,color] of Object.entries(palette)){const r=Number(ratio),data=[];for(let i=start;i<this.data.candles.length;i++){const value=channelPrice(candidate,this.weeklyData.candles,this.data.candles[i].time,r);if(Number.isFinite(value)&&value>0)data.push({time:this.data.candles[i].time,value})}add(data,color,0,{lineWidth:r===0||r===1?2:1,lastValueVisible:true,title:String(r),...(this.interval.endsWith('m')?{autoscaleInfoProvider:()=>null}:{})})}
     const first=chartSeconds(this.data.candles[0].time),last=chartSeconds(this.data.candles.at(-1).time),markers=candidate.anchors.filter(x=>chartSeconds(x.time)>=first&&chartSeconds(x.time)<=last).map((x,i)=>{const nearest=this.data.candles.reduce((best,row)=>Math.abs(chartSeconds(row.time)-chartSeconds(x.time))<Math.abs(chartSeconds(best.time)-chartSeconds(x.time))?row:best);return {time:nearest.time,position:this.options.fib==='high'?'aboveBar':'belowBar',color:'#edf7ff',shape:'circle',text:['①','②','③'][x.point-1]}});
     this.fibMarkers=L.createSeriesMarkers(this.candles,markers);
 
