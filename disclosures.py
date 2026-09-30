@@ -2,12 +2,20 @@
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
+from threading import Lock
 import html, json, re, time, xml.etree.ElementTree as ET
 from cache import cached, BASE
 from providers import SESSION, directory, now
 INVESTORS=[('1067983','Berkshire Hathaway','Warren Buffett / Berkshire'),('1336528','Pershing Square','Bill Ackman'),('1536411','Duquesne Family Office','Stanley Druckenmiller'),('1656456','Appaloosa','David Tepper'),('1061768','Baupost Group','Seth Klarman'),('1167483','Tiger Global','Chase Coleman')]
+_sec_lock=Lock()
+_sec_last=0
 
 def get(url):
+    global _sec_last
+    if 'sec.gov/' in url:
+        with _sec_lock:
+            time.sleep(max(0,.15-(time.monotonic()-_sec_last)))
+            _sec_last=time.monotonic()
     r=SESSION.get(url,timeout=20);r.raise_for_status();return r
 
 def clean_name(s):
@@ -72,28 +80,83 @@ def filing(cik, accession, report, filed):
             x['weight']=x['value']/total*100 if total else 0
             mapped=match_name(x['name'],x['cusip'])
             if mapped:x.update(tv=mapped['tv'],symbol=mapped['tv'],ticker=mapped['ticker'])
-        return {'holdings':list(aggregate.values()),'total':total,'valueUnit':'원문 신고값 (비중 계산용)','quarter':report,'filed':filed,'accession':accession,'sourceUrl':base+accession+'-index.htm','tableUrl':source}
+        return {'holdings':list(aggregate.values()),'total':total,'valueUnit':'원문 신고값 (비중 계산용)','quarter':report,'filed':filed,'accession':accession,'sourceUrl':base+accession+'-index.htm','tableUrl':source,'amendmentType':text(primary,'amendmentType') if primary is not None else ''}
     return cached('filing:'+accession,604800,load)
+
+def submission_rows(cik):
+    d=cached('submission:'+cik,21600,lambda:get('https://data.sec.gov/submissions/CIK'+cik.zfill(10)+'.json').json())
+    r=d['filings']['recent']
+    return d['name'],[{k:r[k][i] for k in ['form','reportDate','filingDate','accessionNumber','primaryDocument']}for i,f in enumerate(r['form'])if f in ['13F-HR','13F-HR/A','13F-NT','13F-NT/A']]
+
+def reporting_manager(cik):
+    """Follow an explicit, single-manager 13F NOTICE; never infer a successor by name."""
+    name,rows=submission_rows(cik);seen={cik};notice=None
+    for _ in range(3):
+        latest=max(rows,key=lambda x:(x['reportDate'],x['filingDate'],x['accessionNumber']))
+        if not latest['form'].startswith('13F-NT'):break
+        acc=latest['accessionNumber'];base='https://www.sec.gov/Archives/edgar/data/'+str(int(cik))+'/'+acc.replace('-','')+'/'
+        root=ET.fromstring(get(base+latest['primaryDocument'].split('/')[-1]).content)
+        managers=[x for x in root.iter()if x.tag.rsplit('}',1)[-1]=='otherManager']
+        targets={text(x,'cik').lstrip('0') for x in managers if text(x,'cik')}
+        if len(targets)!=1:raise ValueError('Multiple reporting managers require review')
+        target=targets.pop()
+        if target in seen:raise ValueError('Circular reporting manager notice')
+        seen.add(target);target_name,target_rows=submission_rows(target)
+        if not any(x['reportDate']==latest['reportDate']and x['form'].startswith('13F-HR') for x in target_rows):raise ValueError('Referenced report unavailable')
+        last_regular=max((x['reportDate']for x in rows if x['form'].startswith('13F-HR')),default='')
+        transition=min((x['reportDate']for x in rows if x['form'].startswith('13F-NT')and x['reportDate']>last_regular),default=latest['reportDate'])
+        notice={'sourceUrl':base+acc+'-index.htm','quarter':latest['reportDate'],'filed':latest['filingDate'],'name':name,'transitionQuarter':transition}
+        cik,name,rows=target,target_name,target_rows
+    else:raise ValueError('Reporting manager chain too long')
+    return cik,name,rows,notice
+
+def merge_filings(snapshots):
+    """A restatement replaces the report; NEW HOLDINGS adds disclosed positions."""
+    positions={};sources=[];current=None
+    for s in snapshots:
+        kind=s.get('amendmentType','')
+        if not kind or kind=='RESTATEMENT':
+            positions={x['key']:dict(x)for x in s['holdings']};sources=[]
+        elif kind=='NEW HOLDINGS':
+            for x in s['holdings']:
+                if x['key'] in positions:
+                    positions[x['key']]['shares']+=x['shares'];positions[x['key']]['value']+=x['value']
+                else:positions[x['key']]=dict(x)
+        else:raise ValueError('Unsupported amendment type')
+        sources.append({'url':s['sourceUrl'],'filed':s['filed'],'type':kind or '13F-HR'});current=s
+    if current is None:raise ValueError('No holdings report')
+    total=sum(x['value']for x in positions.values())
+    for x in positions.values():x['weight']=x['value']/total*100 if total else 0
+    return dict(current,holdings=list(positions.values()),total=total,filings=sources)
+
+def quarter_snapshot(cik,rows,quarter):
+    selected=sorted([x for x in rows if x['reportDate']==quarter and x['form'].startswith('13F-HR')],key=lambda x:(x['filingDate'],x['accessionNumber']))
+    snapshots=[]
+    for x in selected:
+        s=filing(cik,x['accessionNumber'],quarter,x['filingDate'])
+        if x['form']=='13F-HR/A' and not s.get('amendmentType'):raise ValueError('Amendment metadata missing')
+        snapshots.append(s)
+    if not any(x['form']=='13F-HR' for x in selected)and not any(x.get('amendmentType')=='RESTATEMENT' for x in snapshots):raise ValueError('Original report missing')
+    return merge_filings(snapshots)
 
 def investor(cik,name,person):
     def load():
-        def submissions():return get('https://data.sec.gov/submissions/CIK'+cik.zfill(10)+'.json').json()
-        d=cached('submission:'+cik,21600,submissions);r=d['filings']['recent'];indices=[i for i,f in enumerate(r['form'])if f=='13F-HR'];selected=[];seen=set()
-        for i in indices:
-            report=r['reportDate'][i]
-            if report and report not in seen:selected.append(i);seen.add(report)
-            if len(selected)==2:break
+        reporting_cik,reporting_name,r,reporting_notice=reporting_manager(cik)
+        selected=sorted({x['reportDate']for x in r if x['form'].startswith('13F-HR')and x['reportDate']},reverse=True)[:2]
         if len(selected)<2:raise ValueError('Comparison filings unavailable')
-        snapshots=[filing(cik,r['accessionNumber'][i],r['reportDate'][i],r['filingDate'][i])for i in selected]
+        snapshots=[quarter_snapshot(reporting_cik,r,q)for q in selected]
         current,previous=snapshots;old={x['key']:x for x in previous['holdings']};new={x['key']:x for x in current['holdings']};rows=[]
+        comparable=not reporting_notice or previous['quarter']>=reporting_notice['transitionQuarter']
         for key in new.keys()|old.keys():
             a,b=new.get(key),old.get(key);row=dict(a or b);row['previousShares']=b['shares']if b else 0;row['previousWeight']=b['weight']if b else 0
             row['status']='new'if not b else 'sold'if not a else 'increase'if a['shares']>b['shares'] else 'reduce'if a['shares']<b['shares'] else 'unchanged'
             row['shareChange']=((a['shares']/b['shares']-1)*100)if a and b and b['shares'] else None
             if not a:row.update(shares=0,value=0,weight=0)
-            row['weightChange']=row['weight']-row['previousWeight'];rows.append(row)
+            row['weightChange']=row['weight']-row['previousWeight']
+            if not comparable:row.update(status='scope_change',shareChange=None,weightChange=None,previousShares=None,previousWeight=None)
+            rows.append(row)
         rows.sort(key=lambda x:x['value'],reverse=True)
-        return {'cik':cik,'name':name,'person':person,'quarter':current['quarter'],'filed':current['filed'],'previousQuarter':previous['quarter'],'sourceUrl':current['sourceUrl'],'previousUrl':previous['sourceUrl'],'tableUrl':current['tableUrl'],'total':current['total'],'holdings':rows,'counts':{k:sum(x['status']==k for x in rows)for k in ['new','increase','reduce','sold','unchanged']},'updated':now()}
+        return {'cik':cik,'name':name,'person':person,'reportingCik':reporting_cik,'reportingManager':reporting_name,'reportingNotice':reporting_notice,'comparisonAvailable':comparable,'comparisonNote':None if comparable else '보고 주체·보유 범위 변경 분기입니다. 현재 보유는 표시하고 신규·추가·감축 신호에서는 제외합니다.','filings':current['filings'],'previousFilings':previous['filings'],'quarter':current['quarter'],'filed':current['filed'],'previousQuarter':previous['quarter'],'sourceUrl':current['sourceUrl'],'previousUrl':previous['sourceUrl'],'tableUrl':current['tableUrl'],'total':current['total'],'holdings':rows,'counts':{k:sum(x['status']==k for x in rows)for k in ['new','increase','reduce','sold','unchanged']},'updated':now()}
     return cached('investor:'+cik,21600,load,'data-guru-'+cik+'.json')
 
 def gurus():

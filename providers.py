@@ -1,5 +1,6 @@
 """Public market providers. No credentials, fabricated numbers or inferred exchanges."""
 import ast, math, os, re, requests
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone, timedelta
 from urllib.parse import quote
 from cache import cached
@@ -119,12 +120,16 @@ def fear_greed(kind='stock'):
         return {'value':round(f['score']),'classification':f['rating'].replace('_',' ').title(),'history':[{'date':datetime.fromtimestamp(x['x']/1000,timezone.utc).date().isoformat(),'value':x['y']}for x in hist],'source':'CNN stock Fear & Greed Index','sourceUrl':'https://www.cnn.com/markets/fear-and-greed','updated':f.get('timestamp'),'kind':kind}
     return cached('fng:'+kind,1800,load,'data-fng-'+kind+'.json')
 
+INDEXES=[('^GSPC','S&P 500','sp500'),('^IXIC','NASDAQ','nasdaq'),('BTC-USD','Bitcoin','bitcoin')]
+def index_quote(ticker,name,seed):
+    def load():
+        r=SESSION.get('https://query1.finance.yahoo.com/v8/finance/chart/'+quote(ticker,safe=''),params={'range':'5d','interval':'1d'},timeout=10);r.raise_for_status();d=r.json()['chart']['result'][0];m=d['meta'];cl=[v for v in d['indicators']['quote'][0]['close']if v is not None];price=m.get('regularMarketPrice') or cl[-1];prev=m.get('previousClose') or (cl[-2]if len(cl)>1 else None)
+        return {'name':name,'price':price,'change':(price/prev-1)*100 if prev else None,'source':'Yahoo Finance','updated':datetime.fromtimestamp(m['regularMarketTime'],timezone.utc).isoformat()}
+    return cached('index:'+ticker,120,load,'data-index-'+seed+'.json')
+
 def overview():
-    rows=[]
-    for ticker,name in [('^GSPC','S&P 500'),('^IXIC','NASDAQ'),('BTC-USD','Bitcoin')]:
-        def load(t=ticker,n=name):
-            r=SESSION.get('https://query1.finance.yahoo.com/v8/finance/chart/'+quote(t,safe=''),params={'range':'5d','interval':'1d'},timeout=10);r.raise_for_status();d=r.json()['chart']['result'][0];m=d['meta'];cl=[v for v in d['indicators']['quote'][0]['close']if v is not None];price=m.get('regularMarketPrice') or cl[-1];prev=m.get('previousClose') or (cl[-2]if len(cl)>1 else None)
-            return {'name':n,'price':price,'change':(price/prev-1)*100 if prev else None,'source':'Yahoo Finance','updated':datetime.fromtimestamp(m['regularMarketTime'],timezone.utc).isoformat()}
-        try:rows.append(cached('index:'+ticker,120,load))
-        except Exception:rows.append({'name':name,'error':'데이터 없음'})
+    def one(args):
+        try:return index_quote(*args)
+        except Exception:return {'name':args[1],'error':'데이터 없음'}
+    with ThreadPoolExecutor(max_workers=3)as pool:rows=list(pool.map(one,INDEXES))
     return {'rows':rows}

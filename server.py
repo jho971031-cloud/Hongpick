@@ -55,7 +55,7 @@ def performance():
         return jsonify(change=(rows[-1]['close']/rows[0]['close']-1)*100,baselineDate=rows[0]['time'],baseline=rows[0]['close'],latestDate=rows[-1]['time'],latest=rows[-1]['close'],source=d['source'],method='공개일 이후 첫 거래일 종가 → 최신 일봉 종가. 배당 미포함 가격 변화.')
     except Exception:return fail('공개 이후 가격 변화 데이터 없음')
 @app.get('/health')
-def health():return jsonify(status='ok',version='5.0')
+def health():return jsonify(status='ok',version='5.1')
 @app.get('/')
 def home():return send_from_directory(BASE,'index.html')
 @app.get('/<path:name>')
