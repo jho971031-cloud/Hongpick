@@ -8,12 +8,16 @@ app=Flask(__name__,static_folder=None)
 BASE=Path(__file__).resolve().parent
 
 
+
+
 @app.after_request
 def pages_cors(response):
     if request.path.startswith('/api/') and request.method=='GET' and request.headers.get('Origin')=='https://jho971031-cloud.github.io':
         response.headers['Access-Control-Allow-Origin']='https://jho971031-cloud.github.io'
         response.headers.add('Vary','Origin')
     return response
+
+
 
 
 def fail(message,source=None):return jsonify(error=message,source=source),503
@@ -35,9 +39,17 @@ def history():
     except Exception:return fail('일봉 제공원 연결 오류 · 차트 데이터 없음','NAVER Finance / Yahoo Finance')
 @app.get('/api/fib-history')
 def fib_history():
-    try:return jsonify(fib_provider.fibonacci_history(providers.resolve(request.args.get('symbol','')[:40])))
+    try:symbol=providers.resolve(request.args.get('symbol','')[:40])
     except ValueError as e:return jsonify(error=str(e)),400
-    except Exception:return fail('자동 작도용 10년 주봉 데이터 없음','NAVER Finance / Yahoo Finance')
+    try:return jsonify(fib_provider.fibonacci_history(symbol))
+    except Exception:
+        try:
+            name='data-fib-history-'+symbol.replace(':','-')+'.json'
+            response=providers.SESSION.get('https://jho971031-cloud.github.io/Hongpick/'+name,timeout=12);response.raise_for_status()
+            data=response.json()
+            if not data.get('candles'):raise ValueError('주봉 데이터 없음')
+            return jsonify(data)
+        except Exception:return fail('자동 작도용 10년 주봉 데이터 없음','NAVER Finance / Yahoo Finance / Hong Pick Pages snapshot')
 @app.get('/api/turnover')
 def turnover():
     market=request.args.get('market','us')
