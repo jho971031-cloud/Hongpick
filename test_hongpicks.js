@@ -29,6 +29,11 @@ test('Golden cross is a real recent MA20/60 crossover and must still be maintain
  assert.equal(goldenCross(bars(Array(70).fill(100))).matched,false);
  assert.equal(goldenCross(bars(Array(30).fill(100))),null);
 });
+test('A cached intraday candle is not promoted to a completed regular-session close the next day',()=>{
+ const daily={candles:bars(Array.from({length:65},(_,i)=>200-i)),source:'prices',updated:'2025-03-06T05:00:00Z'};
+ const result=analyze({tv:'KRX:005930'},daily,null,new Date('2025-03-07T12:00:00Z'));
+ assert.equal(result.sessionDate,'2025-03-05');assert.equal(result.price,137);
+});
 test('Export excludes funds, preserves source dates, reports failed stocks and orders scores',()=>{
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'hongpick-rank-'));
  try{

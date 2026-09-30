@@ -39,7 +39,9 @@ function scoreMetrics(rsi,weekly,golden,rally){
 function analyze(item,daily,weekly,now=new Date()){
  const market=item.tv.startsWith('KRX:')?'kr':'us';
  if(!validCandles(daily?.candles))return null;
- const candles=completedDaily(daily.candles,market,now);if(candles.length<15)return null;
+ // A cached bar collected during the session does not become a closing bar later.
+ const collected=new Date(daily.updated),asOf=Number.isFinite(collected.getTime())?new Date(Math.min(now.getTime(),collected.getTime())):now;
+ const candles=completedDaily(daily.candles,market,asOf);if(candles.length<15)return null;
  const last=candles.at(-1),rsi=indicators.rsi(candles).at(-1)?.value??null;
  const weekRows=weekly?.candles?.filter(c=>c.time<=last.time)||[];
  const channel=weeklyDistance(weekRows,last.close,last.time),golden=goldenCross(candles),rally=(last.close/candles.at(-2).close-1)*100;
