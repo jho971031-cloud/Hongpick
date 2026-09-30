@@ -111,7 +111,7 @@ def gurus():
             key=x['cusip'];c=consensus.setdefault(key,{'name':x['name'],'cusip':key,'tv':x.get('tv'),'symbol':x.get('symbol'),'ticker':x.get('ticker'),'held':0,'increase':0,'new':0,'investors':[],'quarters':[]})
             c['held']+=1;c['increase']+=x['status']=='increase';c['new']+=x['status']=='new';c['investors'].append(inv['name']);c['quarters'].append(inv['quarter'])
     consensus=sorted(consensus.values(),key=lambda x:(x['increase']+x['new'],x['held']),reverse=True)
-    return {'rows':rows,'consensus':consensus,'source':'SEC EDGAR 13F-HR','updated':now(),'notice':'분기말 미국 13F 신고대상 보유주식. 주식수 증감은 분할·이전 등의 영향을 받을 수 있어 실제 체결 매수/매도와 같지 않습니다. 현금·공매도·해외자산 등은 포함하지 않습니다.','mixedQuarters':len(quarters)>1}
+    return {'rows':rows,'consensus':consensus,'source':'SEC EDGAR 13F-HR','updated':now(),'notice':'분기말 미국 13F 신고대상 보유주식. 비중은 옵션·원금형 자산을 제외한 신고 주식 합계 기준입니다. 주식수 증감은 분할·이전 등의 영향을 받을 수 있어 실제 체결 매수/매도와 같지 않습니다. 현금·공매도·해외자산 등은 포함하지 않습니다.','mixedQuarters':len(quarters)>1}
 
 OGE_API='https://extapps2.oge.gov/201/Presiden.nsf/API.xsp/v2/rest'
 def oge_catalog():
