@@ -27,6 +27,7 @@ jobs:
           python build_static.py --output public
           python -m unittest -v test_architecture.py
           node test_data_client.js
+          node test_hongpicks.js
       - uses: actions/cache@v4
         with:
           path: .snapshot-cache
