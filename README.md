@@ -42,7 +42,11 @@ python -m http.server 8000 --directory public
 
 Pages는 수집된 데이터를 5분 단위로 확인하며 화면에 필요한 파일만 불러옵니다. 같은 요청은 합치고 차트 라이브러리는 차트를 열 때 로드합니다. 일봉을 한 번 받으면 주봉·월봉을 브라우저에서 계산합니다. 최근 API 일봉 20개는 브라우저 IndexedDB에 보관해 연결 오류 때 이전 자료임을 표시하며 재사용합니다. 서버의 백그라운드 갱신은 최대 4개 작업으로 제한합니다. API 모드는 시세/순위90초, 일봉15분, F&G30분, 디렉터리24시간, SEC6시간, OGE문서1시간을 유지합니다.
 
-`providers.py`: 시장 제공원·심볼 디렉터리·일봉 집계. `disclosures.py`: SEC/OGE 수집·비교. `cache.py`: 캐시. `charts.js`: 지표 계산·차트. `server.py`: API. `app.js`: 메뉴/저장/필터. 별도 빌드 단계가 없습니다.
+`providers.py`: 시장 제공원·심볼 디렉터리·일봉 집계. `disclosures.py`: SEC/OGE 수집·비교. `cache.py`: 캐시. `charts.js`: 지표 계산·차트. `server.py`: 보조 API. `app.js`: 메뉴/저장/필터. `data-client.js`: 정적 데이터 우선 전송과 브라우저 캐시. `build_static.py`: 공개 파일 생성·수집. Pages 배포는 Actions에서 자동으로 생성합니다.
+
+## 5.2 확인 사항
+
+`python -m unittest -v test_architecture.py` 및 `node test_data_client.js`: 네트워크 없는 공개 파일 생성, 수집 시각 보존, 캐시 복원과 장애 처리, 지정된 Origin만 CORS 허용, Render 요청 없는 후보 검색·TOP50·일봉/주봉/월봉, 중복 요청 합치기를 검증합니다. 실제 최초 수집은 일봉127개·시세128개였으며 `KRX:266690` 일봉은 제공원에서 받지 못해 없는 데이터로 처리했습니다. 숫자는 매 수집 결과에 따라 달라집니다. 모바일375px/PC1085px에서 가로 넘침이 없고 한국 TOP50 및 복합 필터, 지표·관심종목을 확인했습니다. 관심종목을 먼저 열었을 때 거장 화면이 비는 이동 순서 문제도 보완했습니다.
 
 ## 확인
 
