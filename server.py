@@ -68,6 +68,15 @@ def turnover():
     if market not in ['kr','us']:return jsonify(error='지원하지 않는 시장'),400
     try:return jsonify(providers.turnover(market))
     except Exception:return fail('거래대금 제공원 연결 오류 · 데이터 없음','TradingView Screener')
+@app.get('/api/hongpicks')
+def hongpicks():
+    def load():
+        response=providers.SESSION.get('https://jho971031-cloud.github.io/Hongpick/data-hongpicks.json',timeout=12)
+        response.raise_for_status();data=response.json()
+        if data.get('error') or not isinstance(data.get('rows'),list):raise ValueError('추천 데이터 없음')
+        return data
+    try:return jsonify(providers.cached('hongpicks-v56',900,load))
+    except Exception:return fail('추천 실제 데이터 없음 · 다른 메뉴는 계속 사용할 수 있습니다.','Hong Pick collected OHLCV')
 @app.get('/api/fng')
 def fng():
     kind=request.args.get('kind','stock')
@@ -93,7 +102,7 @@ def performance():
         return jsonify(change=(rows[-1]['close']/rows[0]['close']-1)*100,baselineDate=rows[0]['time'],baseline=rows[0]['close'],latestDate=rows[-1]['time'],latest=rows[-1]['close'],source=d['source'],method='공개일 이후 첫 거래일 종가 → 최신 일봉 종가. 배당 미포함 가격 변화.')
     except Exception:return fail('공개 이후 가격 변화 데이터 없음')
 @app.get('/health')
-def health():return jsonify(status='ok',version='5.4')
+def health():return jsonify(status='ok',version='5.6')
 @app.get('/')
 def home():return send_from_directory(BASE,'index.html')
 @app.get('/<path:name>')
@@ -105,4 +114,3 @@ def files(name):
     if name.startswith('api/'):return jsonify(error='API not found'),404
     return send_from_directory(BASE,'index.html')
 if __name__=='__main__':app.run(host='0.0.0.0',port=int(os.environ.get('PORT',5000)))
-
