@@ -36,7 +36,7 @@ jobs:
         env:
           SEC_CONTACT: ${{ vars.SEC_CONTACT }}
           CNN_FNG_URL: ${{ secrets.CNN_FNG_URL }}
-        run: python build_static.py --refresh --output public --cache-dir .snapshot-cache
+        run: python build_static_v53.py --refresh --output public --cache-dir .snapshot-cache
       - uses: actions/upload-pages-artifact@v4
         with:
           path: public
