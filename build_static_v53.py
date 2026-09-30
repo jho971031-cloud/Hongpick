@@ -1,5 +1,5 @@
 """Build Hong Pick static files, then add completed 10-year weekly snapshots."""
-import argparse, json
+import argparse, json, shutil
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from build_static import build as base_build
@@ -7,6 +7,7 @@ import fib_provider as p
 
 def build(output,refresh=False,cache_dir=None):
     output=Path(output);base_build(output,refresh,cache_dir)
+    shutil.copy2(Path(__file__).resolve().parent/'fib-client.js',output/'fib-client.js')
     path=output/'data-manifest.json';manifest=json.loads(path.read_text(encoding='utf-8'))
     manifest['version']='5.3';manifest['fibHistories']={};symbols=sorted(manifest.get('histories',{}))
     if refresh:
