@@ -1,4 +1,4 @@
-# Hong Pick 5.1
+# Hong Pick 5.2
 
 기존 Flask + HTML/CSS/JS 프로젝트를 확장한 개인용 주식 대시보드입니다.
 
@@ -9,9 +9,23 @@ pip install -r requirements.txt
 python server.py
 ```
 
-운영 주소: https://hongpick.onrender.com/
+기본 운영 주소: https://jho971031-cloud.github.io/Hongpick/
 
-GitHub Pages 주소는 API가 있는 운영 주소로 자동 이동하며 메뉴 해시를 유지합니다. 기존 GitHub → Render 연결을 유지합니다. Build: `pip install -r requirements.txt`, Start: `gunicorn server:app`. `gunicorn.conf.py`가 PORT 바인딩, 8개 스레드와 요청 제한 시간을 설정합니다. 새 무료 서비스에는 `render.yaml`을 사용할 수 있습니다. `/health`는 상태와 버전을 반환합니다. API 키가 필요하지 않으며 SEC 연락처는 선택 환경변수 `SEC_CONTACT`로 지정할 수 있습니다.
+GitHub Pages가 화면과 수집된 JSON을 직접 제공합니다. Python 수집기는 `.github/workflows/pages.yml`의 GitHub Actions에서 30분 간격으로 실행하고 공개 파일만 Pages에 배포합니다. 저장소 Settings → Pages → Source를 **GitHub Actions**로 설정합니다. 최초 실행은 Actions → Collect data and publish Hong Pick → Run workflow로 시작할 수 있습니다. 새 코드를 main에 올려도 자동 실행됩니다. 예약 실행은 지연될 수 있으며 공개 저장소는 60일간 활동이 없으면 예약 실행이 비활성화될 수 있습니다.
+
+홈·거래대금·거장·공시·심리·관심종목 및 수집된 종목 차트는 Render 없이 동작합니다. 수집 범위는 한국/미국 TOP50, 운용사별 주요 10개 보유종목, 검증된 Trump 거래와 주요 검색 종목입니다. 미수집 종목은 화면 위 **미수집 종목 API 보완**이 켜져 있을 때만 기존 Render API를 호출합니다. 이 옵션을 끄면 Render 요청 없이 운영하며 없는 데이터는 없다고 표시합니다. 실시간 시세가 아닌 수집 시각 기준 데이터입니다. 아직 수집하지 않은 임의 종목을 즉시 조회하는 기능까지 모두 유지하려면 보조 API가 필요합니다.
+
+기존 API 운영 주소는 https://hongpick.onrender.com/ 입니다. 기존 GitHub → Render 자동 배포를 유지합니다. Build: `pip install -r requirements.txt`, Start: `gunicorn server:app`. `/health`는 상태와 버전을 반환합니다. GitHub Pages의 지정된 Origin에만 공개 GET API의 CORS 응답을 허용합니다. 유료 서비스나 새 계정은 추가하지 않습니다. SEC 연락처는 환경변수 또는 저장소 변수 `SEC_CONTACT`로 지정할 수 있습니다. 승인된 CNN 호환 제공원은 Actions secret `CNN_FNG_URL` 또는 서버 환경변수로 설정합니다.
+
+정적 파일 생성·미리보기:
+
+```sh
+python build_static.py --output public              # 기존 실제 스냅샷으로 오프라인 생성
+python build_static.py --refresh --output public    # 제공원에서 실제 데이터 수집
+python -m http.server 8000 --directory public
+```
+
+로컬 정적 미리보기는 `http://localhost:8000/?mode=static`으로 엽니다. Actions의 캐시는 날짜가 있는 실제 수집 결과를 실행 간 재사용하고 일봉·13F는 6시간, 종목 디렉터리는 24시간, 공시 목록은 1시간 기준으로 갱신합니다. 제공원 오류는 다른 메뉴에 영향을 주지 않으며 원래 수집 시각을 유지합니다. CNN 기본 주소는 접근 제한이 확인되어 정적 수집에서 재시도하지 않습니다.
 
 ## 동작하는 메뉴
 
@@ -26,7 +40,7 @@ GitHub Pages 주소는 API가 있는 운영 주소로 자동 이동하며 메뉴
 
 ## 갱신과 오류 처리
 
-시세/순위 90초, 일봉15분, F&G30분, 디렉터리24시간, SEC6시간, OGE문서1시간. 화면이 보일 때 해당 시장 데이터만 요청합니다. 단일 진행 캐시와 백그라운드 재검증을 사용합니다. `data-*.json`은 출처/수집 시각이 있는 검증된 실제 스냅샷입니다. 장애 시 이전 데이터임을 표시하고 새로 요청하며, 없는 데이터는 숫자를 만들지 않습니다. Render 무료 서비스 재시작 시 메모리 캐시는 초기화됩니다.
+Pages는 수집된 데이터를 5분 단위로 확인하며 화면에 필요한 파일만 불러옵니다. 같은 요청은 합치고 차트 라이브러리는 차트를 열 때 로드합니다. 일봉을 한 번 받으면 주봉·월봉을 브라우저에서 계산합니다. 최근 API 일봉 20개는 브라우저 IndexedDB에 보관해 연결 오류 때 이전 자료임을 표시하며 재사용합니다. 서버의 백그라운드 갱신은 최대 4개 작업으로 제한합니다. API 모드는 시세/순위90초, 일봉15분, F&G30분, 디렉터리24시간, SEC6시간, OGE문서1시간을 유지합니다.
 
 `providers.py`: 시장 제공원·심볼 디렉터리·일봉 집계. `disclosures.py`: SEC/OGE 수집·비교. `cache.py`: 캐시. `charts.js`: 지표 계산·차트. `server.py`: API. `app.js`: 메뉴/저장/필터. 별도 빌드 단계가 없습니다.
 

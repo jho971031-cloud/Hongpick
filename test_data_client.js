@@ -1,0 +1,14 @@
+/* Exercise browser transport in a Node VM with the real dated export. */
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
+let requests=[];
+const context={window:{},location:{href:'https://jho971031-cloud.github.io/Hongpick/',hostname:'jho971031-cloud.github.io',origin:'https://jho971031-cloud.github.io'},localStorage:{getItem:()=> 'off',setItem(){}},URL,URLSearchParams,AbortController,setTimeout,clearTimeout,console,
+ fetch:async url=>{requests.push(String(url));assert.equal(new URL(url).host,'jho971031-cloud.github.io','Render request escaped static-only mode');const name=new URL(url).pathname.split('/').at(-1);const body=JSON.parse(fs.readFileSync('public/'+name,'utf8'));return {ok:true,headers:{get:()=> 'application/json'},json:async()=>body}}};
+vm.createContext(context);vm.runInContext(fs.readFileSync('data-client.js','utf8'),context);
+(async()=>{const client=context.window.HongData;
+ const [a,b]=await Promise.all([client.api('/api/turnover?market=kr'),client.api('/api/turnover?market=kr')]);assert.equal(a.rows.length,50);assert.equal(a,b);assert.equal(requests.filter(x=>x.includes('data-turnover-kr.json')).length,1);
+ for(const [query,tv]of[['삼성전자','KRX:005930'],['테슬라','NASDAQ:TSLA'],['애플','NASDAQ:AAPL'],['IBM','NYSE:IBM']]){const d=await client.api('/api/search?q='+encodeURIComponent(query));assert.equal(d.results[0].tv,tv)}
+ const before=requests.length;const daily=await client.api('/api/history?symbol=NASDAQ:NVDA&interval=D'),weekly=await client.api('/api/history?symbol=NASDAQ:NVDA&interval=W'),monthly=await client.api('/api/history?symbol=NASDAQ:NVDA&interval=M');assert.equal(requests.length-before,1);assert.ok(weekly.candles.length<daily.candles.length);assert.ok(monthly.candles.length<weekly.candles.length);assert.equal(monthly.candles.at(-1).close,daily.candles.at(-1).close);
+ const fixture={candles:[{time:'2025-12-31',open:10,high:12,low:9,close:11,volume:3},{time:'2026-01-02',open:11,high:14,low:8,close:13,volume:5},{time:'2026-01-05',open:13,high:15,low:12,close:14,volume:7}]};const agg=client.aggregate(fixture,'W');assert.equal(agg.candles.length,2);assert.equal(agg.candles[0].time,'2025-12-31');assert.equal(agg.candles[0].open,10);assert.equal(agg.candles[0].close,13);assert.equal(agg.candles[0].high,14);assert.equal(agg.candles[0].low,8);assert.equal(agg.candles[0].volume,8);
+ await assert.rejects(client.api('/api/history?symbol=NASDAQ:UNAVAILABLE&interval=D'),/아직 수집하지/);await assert.rejects(client.api('/api/fng?kind=stock'),/CNN/);const crypto=await client.api('/api/fng?kind=crypto');assert.ok(crypto.history.length>0);
+ console.log('PASS: static-only menus/search, no Render requests, single-flight, daily reuse and week/month aggregation, explicit missing data');
+})().catch(error=>{console.error(error);process.exitCode=1});

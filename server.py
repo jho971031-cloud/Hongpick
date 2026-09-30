@@ -2,10 +2,17 @@
 from flask import Flask, jsonify, request, send_from_directory
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
-import os
+import os, re
 import providers, disclosures
 app=Flask(__name__,static_folder=None)
 BASE=Path(__file__).resolve().parent
+
+@app.after_request
+def pages_cors(response):
+    if request.path.startswith('/api/') and request.method=='GET' and request.headers.get('Origin')=='https://jho971031-cloud.github.io':
+        response.headers['Access-Control-Allow-Origin']='https://jho971031-cloud.github.io'
+        response.headers.add('Vary','Origin')
+    return response
 
 def fail(message,source=None):return jsonify(error=message,source=source),503
 @app.get('/api/search')
@@ -55,12 +62,15 @@ def performance():
         return jsonify(change=(rows[-1]['close']/rows[0]['close']-1)*100,baselineDate=rows[0]['time'],baseline=rows[0]['close'],latestDate=rows[-1]['time'],latest=rows[-1]['close'],source=d['source'],method='공개일 이후 첫 거래일 종가 → 최신 일봉 종가. 배당 미포함 가격 변화.')
     except Exception:return fail('공개 이후 가격 변화 데이터 없음')
 @app.get('/health')
-def health():return jsonify(status='ok',version='5.1')
+def health():return jsonify(status='ok',version='5.2')
 @app.get('/')
 def home():return send_from_directory(BASE,'index.html')
 @app.get('/<path:name>')
 def files(name):
-    if name in ['app.js','charts.js','style.css','manifest.json','lightweight-charts.js','LICENSE-lightweight-charts.txt','responsive-check.html']:return send_from_directory(BASE,name)
+    if name in ['app.js','data-client.js','charts.js','style.css','manifest.json','lightweight-charts.js','LICENSE-lightweight-charts.txt','responsive-check.html']:return send_from_directory(BASE,name)
+    if re.fullmatch(r'data-[A-Za-z0-9-]+\.json',name):
+        public=BASE/'public'
+        return send_from_directory(public if (public/name).exists() else BASE,name)
     if name.startswith('api/'):return jsonify(error='API not found'),404
     return send_from_directory(BASE,'index.html')
 if __name__=='__main__':app.run(host='0.0.0.0',port=int(os.environ.get('PORT',5000)))

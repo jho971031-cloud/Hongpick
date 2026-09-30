@@ -5,7 +5,7 @@ from datetime import datetime, timezone, timedelta
 from urllib.parse import quote
 from cache import cached
 SESSION = requests.Session()
-SESSION.headers['User-Agent'] = 'HongPick personal dashboard; contact: ' + os.getenv('SEC_CONTACT', 'hongpick@example.com')
+SESSION.headers['User-Agent'] = 'HongPick personal dashboard; contact: ' + (os.getenv('SEC_CONTACT') or 'hongpick@example.com')
 ALIASES = {'테슬라':'TSLA','애플':'AAPL','엔비디아':'NVDA','마이크로소프트':'MSFT','아마존':'AMZN','메타':'META','구글':'GOOGL','알파벳':'GOOGL','삼성전자':'005930','sk하이닉스':'000660','하이닉스':'000660','현대차':'005380','네이버':'035420','카카오':'035720','기아':'000270'}
 COLUMNS = ['name','description','exchange','type','close','change','volume','Value.Traded','RSI','price_52_week_high','relative_volume_10d_calc','currency','update_mode']
 
@@ -100,7 +100,7 @@ def history(tv,interval='D'):
         candles=sorted({x['time']:x for x in candles if x['close']>0}.values(),key=lambda x:x['time'])
         if len(candles)<2:raise ValueError('OHLCV unavailable')
         return {'candles':candles,'source':source,'sourceUrl':source_url,'updated':now(),'lastBar':candles[-1]['time'],'interval':'D','adjustment':'제공원 OHLCV 기준. 기업행사에 따라 제공원별 조정 방식이 다를 수 있습니다.'}
-    data=cached('history:'+tv,900,load,'data-history-'+tv.replace(':','-')+'.json')
+    data=cached('history:'+tv,int(os.getenv('HONGPICK_HISTORY_TTL','900')),load,'data-history-'+tv.replace(':','-')+'.json')
     if interval=='D':return data
     groups={}
     for c in data['candles']:

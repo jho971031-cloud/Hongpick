@@ -167,6 +167,9 @@ def gurus():
         for args,job in jobs:
             try:rows.append(job.result())
             except Exception:rows.append({'cik':args[0],'name':args[1],'person':args[2],'error':'SEC 공시를 불러오지 못했습니다','holdings':[]})
+    return summarize_gurus(rows)
+
+def summarize_gurus(rows):
     quarters={x.get('quarter')for x in rows if x.get('quarter')};consensus={}
     for inv in rows:
         for x in inv['holdings']:
@@ -195,4 +198,7 @@ def oge_catalog():
 
 def trump():
     catalog=oge_catalog();data=json.loads((BASE/'data-trump-transactions.json').read_text()) if (BASE/'data-trump-transactions.json').exists() else {'rows':[]}
+    return format_trump(catalog,data)
+
+def format_trump(catalog,data):
     return dict(data,reports=catalog['reports'],catalogUpdated=catalog.get('updated'),catalogStale=catalog.get('stale',False),notice='공개된 신고 거래입니다. 제3자 독립 운용 거래가 포함될 수 있으며 트럼프 본인의 직접 투자 결정을 의미하지 않습니다. 금액은 신고 구간으로 실제 체결 금액과 다릅니다. 검증된 행만 표시하며 신규 스캔 원문은 문서 목록에서 확인할 수 있습니다.')

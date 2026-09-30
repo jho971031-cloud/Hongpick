@@ -1,1 +1,1 @@
-{"name":"Hong Pick","short_name":"Hong Pick","start_url":"/","display":"standalone","background_color":"#06101b","theme_color":"#06101b"}
+{"name":"Hong Pick","short_name":"Hong Pick","start_url":"./","scope":"./","display":"standalone","background_color":"#06101b","theme_color":"#06101b"}
