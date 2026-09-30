@@ -1,0 +1,55 @@
+name: Collect data and publish Hong Pick
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  schedule:
+    - cron: '17,47 * * * *'
+permissions:
+  contents: read
+concurrency:
+  group: hongpick-pages
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Verify architecture on code changes
+        if: github.event_name != 'schedule'
+        run: |
+          python build_static.py --output public
+          python -m unittest -v test_architecture.py
+          node test_data_client.js
+      - uses: actions/cache@v4
+        with:
+          path: .snapshot-cache
+          key: hongpick-data-v1-${{ github.run_id }}
+          restore-keys: hongpick-data-v1-
+      - name: Collect public market data
+        env:
+          SEC_CONTACT: ${{ vars.SEC_CONTACT }}
+          CNN_FNG_URL: ${{ secrets.CNN_FNG_URL }}
+        run: python build_static.py --refresh --output public --cache-dir .snapshot-cache
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: public
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
