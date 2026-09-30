@@ -11,7 +11,7 @@ async function api(path){
  return HongData.api(path);
 }
 let chartScripts;
-function ensureCharts(){if(!chartScripts)chartScripts=(async()=>{for(const name of ['lightweight-charts.js','charts.js'])await new Promise((resolve,reject)=>{const script=document.createElement('script');script.src=HongData.asset(name);script.onload=resolve;script.onerror=()=>{script.remove();reject(Error('차트 모듈을 불러오지 못했습니다.'))};document.head.append(script)})})().catch(error=>{chartScripts=null;throw error});return chartScripts}
+function ensureCharts(){if(!chartScripts)chartScripts=(async()=>{for(const name of ['fib-client.js','lightweight-charts.js','charts.js?v=5.3'])await new Promise((resolve,reject)=>{const script=document.createElement('script');script.src=HongData.asset(name);script.onload=resolve;script.onerror=()=>{script.remove();reject(Error('차트 모듈을 불러오지 못했습니다.'))};document.head.append(script)})})().catch(error=>{chartScripts=null;throw error});return chartScripts}
 function notice(root,text){root.innerHTML='<div class="empty">'+escapeHtml(text)+'</div>'}
 function source(d){return `${d.source||''} · 기준시각 ${formatDate(d.updated)}${d.stale?' · 이전 데이터':''}`}
 const pages=['home','search','gurus','turnover','fng','trump','watchlist'];
