@@ -57,6 +57,17 @@ function channelExtension(candles,interval,count=52){
  for(let i=0;i<count;i++){if(minute)date=new Date(date.getTime()+parseInt(interval)*60000);else if(interval==='M'){date.setUTCDate(1);date.setUTCMonth(date.getUTCMonth()+1)}else if(interval==='W')date.setUTCDate(date.getUTCDate()+7);else{do{date.setUTCDate(date.getUTCDate()+1)}while([0,6].includes(date.getUTCDay()))}result.push({time:minute?Math.floor(date.getTime()/1000):date.toISOString().slice(0,10)})}return result;
 }
 function channelPrice(candidate,weekly,time,ratio=0){return Math.exp(Math.log(candidate.anchors[0].price)+candidate.slope*(referencePosition(time,weekly)-candidate.a)+ratio*candidate.width)}
+// After the last real bar, continue the visible tangent by chart bar index.
+// The time scale spaces bars equally even across weekends and market holidays.
+function channelProjection(candidate,reference,points,actualCount){
+ const lastPosition=referencePosition(points[actualCount-1].time,reference);
+ const priorPosition=referencePosition(points[actualCount-2].time,reference);
+ const logLast=Math.log(candidate.anchors[0].price)+candidate.slope*(lastPosition-candidate.a);
+ const logStep=candidate.slope*(lastPosition-priorPosition);
+ return (index,ratio=0)=>index<actualCount
+  ?channelPrice(candidate,reference,points[index].time,ratio)
+  :Math.exp(logLast+logStep*(index-actualCount+1)+ratio*candidate.width);
+}
 function channelFit(candidate,reference,price,time){
  if(!candidate||!reference?.length||!(price>0))return {useful:false,distance:Infinity};
  const levels=[0,.5,1,1.5,2,2.5,3].map(r=>channelPrice(candidate,reference,time,r)),distance=Math.min(...levels.map(value=>Math.abs(Math.log(value/price))));
@@ -69,9 +80,9 @@ function completedReference(data,frame){
  return {...data,candles,interval:frame};
 }
 class FibonacciBands {
- constructor(candles,candidate,weekly){this.weekly=weekly;this.candles=candles;this.candidate=candidate;this.rows=[];this.colors=['rgba(82,189,88,.07)','rgba(255,81,91,.07)','rgba(0,169,141,.07)','rgba(255,173,22,.07)','rgba(0,189,217,.07)','rgba(146,152,159,.06)'];this.view={zOrder:()=> 'bottom',renderer:()=>({draw:target=>target.useMediaCoordinateSpace(({context:ctx})=>{for(let i=1;i<this.rows.length;i++){const left=this.rows[i-1],right=this.rows[i];if(!left||!right)continue;for(let band=0;band<6;band++){ctx.fillStyle=this.colors[band];ctx.beginPath();ctx.moveTo(left.x,left.y[band]);ctx.lineTo(right.x,right.y[band]);ctx.lineTo(right.x,right.y[band+1]);ctx.lineTo(left.x,left.y[band+1]);ctx.closePath();ctx.fill()}}})})}}
+ constructor(candles,candidate,priceAt){this.priceAt=priceAt;this.candles=candles;this.candidate=candidate;this.rows=[];this.colors=['rgba(82,189,88,.07)','rgba(255,81,91,.07)','rgba(0,169,141,.07)','rgba(255,173,22,.07)','rgba(0,189,217,.07)','rgba(146,152,159,.06)'];this.view={zOrder:()=> 'bottom',renderer:()=>({draw:target=>target.useMediaCoordinateSpace(({context:ctx})=>{for(let i=1;i<this.rows.length;i++){const left=this.rows[i-1],right=this.rows[i];if(!left||!right)continue;for(let band=0;band<6;band++){ctx.fillStyle=this.colors[band];ctx.beginPath();ctx.moveTo(left.x,left.y[band]);ctx.lineTo(right.x,right.y[band]);ctx.lineTo(right.x,right.y[band+1]);ctx.lineTo(left.x,left.y[band+1]);ctx.closePath();ctx.fill()}}})})}}
  attached({chart,series,requestUpdate}){this.chart=chart;this.series=series;requestUpdate()}
- updateAllViews(){const c=this.candidate,start=0,ratios=[0,.5,1,1.5,2,2.5,3];this.rows=[];for(let i=start;i<this.candles.length;i++){const x=this.chart.timeScale().timeToCoordinate(this.candles[i].time),y=ratios.map(r=>this.series.priceToCoordinate(channelPrice(c,this.weekly,this.candles[i].time,r)));this.rows.push(x==null||y.some(v=>v==null)?null:{x,y})}}
+ updateAllViews(){const ratios=[0,.5,1,1.5,2,2.5,3];this.rows=[];for(let i=0;i<this.candles.length;i++){const x=this.chart.timeScale().timeToCoordinate(this.candles[i].time),y=ratios.map(r=>this.series.priceToCoordinate(this.priceAt(i,r)));this.rows.push(x==null||y.some(v=>v==null)?null:{x,y})}}
  paneViews(){return[this.view]}
 }
 window.HongChart=class {
@@ -110,12 +121,13 @@ window.HongChart=class {
   if(this.options.fib!=='off'){
    const candidate=this.selectedCandidate;this.fibCandidate=candidate;
    if(candidate){
-    const palette={0:'#92989f',.5:'#52bd58',1:'#ff515b',1.5:'#00a98d',2:'#ffad16',2.5:'#00bdd9',3:'#92989f'},start=0,extended=channelExtension(this.data.candles,this.interval);
-    for(const [ratio,color] of Object.entries(palette)){const r=Number(ratio),data=[];for(let i=start;i<extended.length;i++){const value=channelPrice(candidate,this.referenceData.candles,extended[i].time,r);if(Number.isFinite(value)&&value>0)data.push({time:extended[i].time,value})}add(data,color,0,{lineWidth:r===0||r===1?2:1,lastValueVisible:true,title:String(r),autoscaleInfoProvider:()=>null})}
+    const palette={0:'#92989f',.5:'#52bd58',1:'#ff515b',1.5:'#00a98d',2:'#ffad16',2.5:'#00bdd9',3:'#92989f'},extended=channelExtension(this.data.candles,this.interval);
+    const priceAt=channelProjection(candidate,this.referenceData.candles,extended,this.data.candles.length);
+    for(const [ratio,color] of Object.entries(palette)){const r=Number(ratio),data=[];for(let i=0;i<extended.length;i++){const value=priceAt(i,r);if(Number.isFinite(value)&&value>0)data.push({time:extended[i].time,value})}add(data,color,0,{lineWidth:r===0||r===1?2:1,lastValueVisible:true,title:String(r),autoscaleInfoProvider:()=>null})}
     const first=chartSeconds(this.data.candles[0].time),last=chartSeconds(this.data.candles.at(-1).time),markers=candidate.anchors.filter(x=>chartSeconds(x.time)>=first&&chartSeconds(x.time)<=last).map((x,i)=>{const nearest=this.data.candles.reduce((best,row)=>Math.abs(chartSeconds(row.time)-chartSeconds(x.time))<Math.abs(chartSeconds(best.time)-chartSeconds(x.time))?row:best);return {time:nearest.time,position:this.options.fib==='high'?'aboveBar':'belowBar',color:'#edf7ff',shape:'circle',text:['①','②','③'][x.point-1]}});
     this.fibMarkers=L.createSeriesMarkers(this.candles,markers);
 
-    this.fibCloud=new FibonacciBands(extended,candidate,this.referenceData.candles);this.candles.attachPrimitive(this.fibCloud);
+    this.fibCloud=new FibonacciBands(extended,candidate,priceAt);this.candles.attachPrimitive(this.fibCloud);
     this.fibStatus=(this.fibReason?this.fibReason+' · ':'')+(this.options.fib==='high'?'고–고–고':'저–저–저')+' · 오른쪽 연장 · ① '+candidate.anchors[0].time+' · ② '+candidate.anchors[1].time+' · 변곡 '+this.referenceData.candles[candidate.turn].time+' · ③ '+candidate.anchors[2].time;
    }else this.fibStatus=(this.fibReason?this.fibReason+' · ':'')+basisLabel(this.fibBasis||this.options.fibFrame)+' 기준에서 조건을 충족하는 후보가 없습니다.';
   }
@@ -139,6 +151,5 @@ window.HongChart=class {
 
  resize(){if(this.chart)this.chart.resize(this.element.clientWidth,this.element.clientHeight)}
 };
-
 
 
