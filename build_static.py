@@ -37,10 +37,7 @@ def build(output,refresh=False,cache_dir=None):
     indexes=[collect('index-'+seed,lambda t=t,n=n,s=seed:p.index_quote(t,n,s),'data-index-'+seed+'.json') for t,n,seed in p.INDEXES]
     write('data-overview.json',{'rows':indexes});manifest['resources']['overview']='data-overview.json'
     collect('fng-crypto',lambda:p.fear_greed('crypto'),'data-fng-crypto.json')
-    if refresh and os.getenv('CNN_FNG_URL'):collect('fng-stock',lambda:p.fear_greed('stock'))
-    else:
-        write('data-fng-stock.json',{'error':'CNN 제공원 접근 제한 · 데이터 없음. 암호화폐 지표는 별도 탭에서 확인할 수 있습니다.','source':'CNN'})
-        manifest['resources']['fng-stock']='data-fng-stock.json'
+    collect('fng-stock',lambda:p.fear_greed('stock'),'data-fng-stock.json')
     investors=[]
     for args in d.INVESTORS:
         investors.append(collect('guru-'+args[0],lambda args=args:d.investor(*args),'data-guru-'+args[0]+'.json'))
@@ -88,3 +85,4 @@ def build(output,refresh=False,cache_dir=None):
 if __name__=='__main__':
     parser=argparse.ArgumentParser();parser.add_argument('--output',default='public');parser.add_argument('--refresh',action='store_true');parser.add_argument('--cache-dir')
     args=parser.parse_args();build(args.output,args.refresh,args.cache_dir)
+

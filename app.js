@@ -12,14 +12,14 @@ async function api(path){
  return HongData.api(path);
 }
 let chartScripts;
-function ensureCharts(){if(!chartScripts)chartScripts=(async()=>{for(const name of ['fib-client.js?v=5.6','lightweight-charts.js','charts.js?v=5.6'])await new Promise((resolve,reject)=>{const script=document.createElement('script');script.src=HongData.asset(name);script.onload=resolve;script.onerror=()=>{script.remove();reject(Error('차트 모듈을 불러오지 못했습니다.'))};document.head.append(script)})})().catch(error=>{chartScripts=null;throw error});return chartScripts}
+function ensureCharts(){if(!chartScripts)chartScripts=(async()=>{for(const name of ['fib-client.js?v=5.7','lightweight-charts.js','charts.js?v=5.7'])await new Promise((resolve,reject)=>{const script=document.createElement('script');script.src=HongData.asset(name);script.onload=resolve;script.onerror=()=>{script.remove();reject(Error('차트 모듈을 불러오지 못했습니다.'))};document.head.append(script)})})().catch(error=>{chartScripts=null;throw error});return chartScripts}
 function notice(root,text){root.innerHTML='<div class="empty">'+escapeHtml(text)+'</div>'}
 function source(d){return `${d.source||''} · 기준시각 ${formatDate(d.updated)}${d.stale?' · 이전 데이터':''}`}
-const pages=['hongpicks','home','search','gurus','turnover','fng','trump','watchlist'];
+const pages=['menu','hongpicks','home','search','gurus','turnover','fng','trump','watchlist'];
 function show(id,updateHash=true){
  if(!pages.includes(id))id='home';state.page=id;
  document.querySelectorAll('.page').forEach(p=>p.classList.toggle('active',p.id===id));
- document.querySelectorAll('nav button').forEach(b=>{b.classList.toggle('active',b.dataset.go===id);b.setAttribute('aria-current',b.dataset.go===id?'page':'false')});
+ document.querySelectorAll('header [data-go]').forEach(b=>{b.classList.toggle('active',b.dataset.go===id);b.setAttribute('aria-current',b.dataset.go===id?'page':'false')});
  window.scrollTo(0,0);if(updateHash&&location.hash!=='#'+id)location.hash=id;
  if(id==='watchlist')renderWatch();if(id==='turnover')loadTurnover();if(id==='gurus')loadGurus();if(id==='trump'&&!state.trump)loadTrump();if(id==='fng')loadFng();
  if(id==='home'){loadOverview();loadFng();loadGurus();loadPicks()}if(id==='hongpicks')loadPicks();
@@ -48,15 +48,16 @@ function sentimentLabels(kind){
 }
 function clearFng(kind,message,loading=false){
  sentimentLabels(kind);$('fngValue').textContent=$('homeFng').textContent='—';$('fngLabel').textContent=$('homeFngLabel').textContent=loading?'불러오는 중…':'데이터 없음';$('homeGaugeValue').textContent=loading?'불러오는 중…':'데이터 없음';$('fngSource').textContent=$('homeFngSource').textContent=message;
- $('fngHistory').replaceChildren();$('fngHistoryDates').textContent='';$('fngMarker').style.display=$('homeGaugeMarker').style.display='none';
+ $('homeFngComparisons').replaceChildren();$('homeFngSummary').textContent=loading?'미국 주식과 암호화폐 지표를 구분해 제공합니다.':message;$('fngHistory').replaceChildren();$('fngHistoryDates').textContent='';$('fngMarker').style.display=$('homeGaugeMarker').style.display='none';
 }
 let fngToken=0;
 async function loadFng(){
  const kind=state.fngKind,token=++fngToken;clearFng(kind,'제공원에서 시장 심리를 확인하는 중…',true);
- try{const d=await api('/api/fng?kind='+kind);if(token!==fngToken)return;const v=Number(d.value);if(!Number.isFinite(v)||v<0||v>100)throw Error('유효한 지표 데이터 없음');
+ try{const d=await api('/api/fng?kind='+kind);if(token!==fngToken)return;const v=d.value==null?NaN:Number(d.value);if(!Number.isFinite(v)||v<0||v>100)throw Error('유효한 지표 데이터 없음');
  $('fngValue').textContent=$('homeFng').textContent=$('homeGaugeValue').textContent=number(v,0);$('fngLabel').textContent=$('homeFngLabel').textContent=d.classification;$('fngSource').textContent=$('homeFngSource').textContent=source(d);
+ const labels={'Extreme Fear':'극단적 공포','Fear':'공포','Neutral':'중립','Greed':'탐욕','Extreme Greed':'극단적 탐욕'};$('homeFngSummary').textContent=(labels[d.classification]||d.classification)+' · '+(kind==='stock'?'미국 주식시장':'암호화폐 시장')+' 심리'+(d.stale?' · 이전 수집 데이터':'');$('homeFngComparisons').innerHTML=Object.entries({previous_close:'전일',previous_1_week:'1주 전',previous_1_month:'1개월 전'}).map(([key,label])=>`<span>${label}<b>${number(d.comparisons?.[key],0)}</b></span>`).join('');
  for(const id of ['fngMarker','homeGaugeMarker']){$(id).style.left=v+'%';$(id).style.display='block'}
- $('fngHistory').innerHTML=d.history.slice(-90).map(x=>`<span class="${x.value<40?'low':''}" style="height:${x.value}%" title="${escapeHtml(x.date)}: ${number(x.value,0)}"></span>`).join('');$('fngHistoryDates').textContent=d.history.length?d.history.slice(-90)[0].date+' → '+d.history.at(-1).date+' · 최근 90일':'';
+ $('fngHistory').innerHTML=(d.history||[]).slice(-90).map(x=>`<span class="${x.value<40?'low':''}" style="height:${x.value}%" title="${escapeHtml(x.date)}: ${number(x.value,0)}"></span>`).join('');$('fngHistoryDates').textContent=d.history.length?d.history.slice(-90)[0].date+' → '+d.history.at(-1).date+' · 최근 90일':'';
  }catch(e){if(token===fngToken)clearFng(kind,e.message)}
 }
 const statusNames={scope_change:'범위 변경',new:'신규',increase:'추가',reduce:'감축',sold:'전량매도',unchanged:'유지'};
@@ -106,3 +107,6 @@ async function openPick(item){
  if(!item)return;try{await ensureCharts();if(!charts.search)charts.search=new HongChart($('searchChart'),$('searchIndicators'));charts.search.options.fib=item.weekly?.mode||'off';charts.search.options.fibFrame='W';charts.search.channelSelection=null;charts.search.interval='W';openStock(item)}catch(error){openStock(item)}
 }
 document.addEventListener('click',e=>{const button=e.target.closest('[data-pick-market]');if(button){picksMarket=button.dataset.pickMarket;document.querySelectorAll('[data-pick-market]').forEach(b=>b.classList.toggle('sel',b===button));renderPicks()}});
+
+
+document.querySelector('.brand').addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();show('home')}});
