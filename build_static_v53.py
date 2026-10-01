@@ -10,7 +10,7 @@ def build(output,refresh=False,cache_dir=None):
     output=Path(output);base_build(output,refresh,cache_dir)
     shutil.copy2(Path(__file__).resolve().parent/'fib-client.js',output/'fib-client.js')
     path=output/'data-manifest.json';manifest=json.loads(path.read_text(encoding='utf-8'))
-    manifest['version']='5.6';manifest['fibHistories']={};symbols=sorted(manifest.get('histories',{}))
+    manifest['version']='5.7';manifest['fibHistories']={};symbols=sorted(manifest.get('histories',{}))
     if refresh:
         with ThreadPoolExecutor(max_workers=3) as pool:
             jobs={pool.submit(p.fibonacci_history,tv):tv for tv in symbols}
@@ -46,3 +46,4 @@ def build(output,refresh=False,cache_dir=None):
 if __name__=='__main__':
     parser=argparse.ArgumentParser();parser.add_argument('--output',default='public');parser.add_argument('--refresh',action='store_true');parser.add_argument('--cache-dir')
     args=parser.parse_args();result=build(args.output,args.refresh,args.cache_dir);print(json.dumps({'generatedAt':result['generatedAt'],'failures':result['failures'],'fibHistories':len(result['fibHistories'])},ensure_ascii=False))
+

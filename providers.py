@@ -110,15 +110,38 @@ def history(tv,interval='D'):
             b=groups[key];b['high']=max(b['high'],c['high']);b['low']=min(b['low'],c['low']);b['close']=c['close'];b['volume']+=c['volume']
     return dict(data,candles=list(groups.values()),interval=interval)
 
+def parse_cnn_fng(d, mirror=False):
+    f=d['fear_and_greed'];value=finite(f.get('score'))
+    stamp=datetime.fromisoformat(f['timestamp'].replace('Z','+00:00'))
+    if value is None or not 0<=value<=100 or stamp.tzinfo is None or stamp>datetime.now(timezone.utc)+timedelta(minutes=5):
+        raise ValueError('Invalid CNN score/timestamp')
+    hist=[]
+    for x in d.get('fear_and_greed_historical',{}).get('data',[]):
+        v=finite(x.get('y'));date=datetime.fromtimestamp(x['x']/1000,timezone.utc).date().isoformat()
+        if v is not None and 0<=v<=100 and date<=stamp.date().isoformat():hist.append({'date':date,'value':v})
+    hist=sorted({x['date']:x for x in hist}.values(),key=lambda x:x['date'])
+    result={'value':round(value),'classification':str(f['rating']).replace('_',' ').title(),'history':hist[-365:],
+        'source':'CNN stock Fear & Greed'+(' · whit3rabbit 공개 수집본' if mirror else ' Index'),
+        'sourceUrl':'https://www.cnn.com/markets/fear-and-greed','updated':stamp.isoformat(),'kind':'stock',
+        'delivery':'public-mirror' if mirror else 'official','collectedAt':now(),
+        'comparisons':{k:finite(f.get(k)) for k in ('previous_close','previous_1_week','previous_1_month','previous_1_year')}}
+    if mirror:result['mirrorUrl']='https://github.com/whit3rabbit/fear-greed-data/blob/main/json/cnn_output.json'
+    if datetime.now(timezone.utc)-stamp>timedelta(days=3):result.update(stale=True,notice='최근 갱신이 지연된 실제 CNN 데이터')
+    return result
+
 def fear_greed(kind='stock'):
     def load():
         if kind=='crypto':
             r=SESSION.get('https://api.alternative.me/fng/',params={'limit':365},timeout=12);r.raise_for_status();records=r.json()['data']
             return {'value':int(records[0]['value']),'classification':records[0]['value_classification'],'history':[{'date':datetime.fromtimestamp(int(x['timestamp']),timezone.utc).date().isoformat(),'value':int(x['value'])}for x in reversed(records)],'source':'Alternative.me Crypto Fear & Greed','sourceUrl':'https://alternative.me/crypto/fear-and-greed-index/','updated':datetime.fromtimestamp(int(records[0]['timestamp']),timezone.utc).isoformat(),'kind':kind}
-        url=os.getenv('CNN_FNG_URL','https://production.dataviz.cnn.io/index/fearandgreed/graphdata')
-        r=SESSION.get(url,timeout=12);r.raise_for_status();d=r.json();f=d['fear_and_greed'];hist=d.get('fear_and_greed_historical',{}).get('data',[])
-        return {'value':round(f['score']),'classification':f['rating'].replace('_',' ').title(),'history':[{'date':datetime.fromtimestamp(x['x']/1000,timezone.utc).date().isoformat(),'value':x['y']}for x in hist],'source':'CNN stock Fear & Greed Index','sourceUrl':'https://www.cnn.com/markets/fear-and-greed','updated':f.get('timestamp'),'kind':kind}
-    return cached('fng:'+kind,1800,load,'data-fng-'+kind+'.json')
+        try:
+            url=(os.getenv('CNN_FNG_URL') or 'https://production.dataviz.cnn.io/index/fearandgreed/graphdata')
+            r=SESSION.get(url,headers={'Accept':'application/json','Referer':'https://www.cnn.com/'},timeout=4);r.raise_for_status()
+            return parse_cnn_fng(r.json())
+        except (requests.RequestException,ValueError,KeyError,TypeError):
+            r=SESSION.get('https://raw.githubusercontent.com/whit3rabbit/fear-greed-data/main/json/cnn_output.json',timeout=10);r.raise_for_status()
+            return parse_cnn_fng(r.json(),mirror=True)
+    return cached('fng-v57:'+kind,1800,load,'data-fng-'+kind+'.json')
 
 INDEXES=[('^GSPC','S&P 500','sp500'),('^IXIC','NASDAQ','nasdaq'),('BTC-USD','Bitcoin','bitcoin')]
 def index_quote(ticker,name,seed):
@@ -133,3 +156,4 @@ def overview():
         except Exception:return {'name':args[1],'error':'데이터 없음'}
     with ThreadPoolExecutor(max_workers=3)as pool:rows=list(pool.map(one,INDEXES))
     return {'rows':rows}
+
