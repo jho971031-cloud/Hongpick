@@ -20,7 +20,7 @@ function show(id,updateHash=true){
  if(!pages.includes(id))id='home';state.page=id;
  document.querySelectorAll('.page').forEach(p=>p.classList.toggle('active',p.id===id));
  document.querySelectorAll('header [data-go]').forEach(b=>{b.classList.toggle('active',b.dataset.go===id);b.setAttribute('aria-current',b.dataset.go===id?'page':'false')});
- window.scrollTo(0,0);if(updateHash&&location.hash!=='#'+id)location.hash=id;
+ window.scrollTo(0,0);if(updateHash&&location.hash!=='#'+id)history.pushState(null,'','#'+id);
  if(id==='watchlist')renderWatch();if(id==='turnover')loadTurnover();if(id==='gurus')loadGurus();if(id==='trump'&&!state.trump)loadTrump();if(id==='fng')loadFng();
  if(id==='home'){loadOverview();loadFng();loadGurus();loadPicks()}if(id==='hongpicks')loadPicks();
  if(id==='search'&&!charts.search)renderChart(state.search||{tv:'NASDAQ:NVDA',symbol:'NASDAQ:NVDA',name:'NVIDIA',ticker:'NVDA'},'search');
