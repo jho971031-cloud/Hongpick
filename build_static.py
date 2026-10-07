@@ -53,22 +53,23 @@ def build(output,refresh=False,cache_dir=None):
     selected.update(x['tv'] for inv in investors for x in inv.get('holdings',[])[:10] if x.get('tv'))
     selected.update(x['tv'] for x in trump.get('rows',[]) if x.get('tv'))
     selected.update(('KRX:005930','KRX:000660','NASDAQ:NVDA','NASDAQ:AAPL','NASDAQ:TSLA','NYSE:IBM','AMEX:SPY'))
-    selected.update(('NYSE:GS','NASDAQ:RGTI','CRYPTO:BTC-USD','CRYPTO:ETH-USD','CRYPTO:SOL-USD'))
+    selected.update(('NYSE:GS','NASDAQ:RGTI'))
+    coin_directory=collect('binance-directory',p.coins.directory,'data-binance-directory.json')
+    coin_turnover=collect('binance-turnover',p.coins.tickers,'data-binance-turnover.json')
+    selected.update(x['tv'] for x in coin_turnover.get('rows',[])[:50])
+    selected.update(('BINANCE:BTCUSDT','BINANCE:ETHUSDT','BINANCE:SOLUSDT'))
     quotes={x['tv']:dict(x,source=data['source'],updated=data.get('updated'),stale=data.get('stale',False),method=data.get('method')) for data in turns.values() for x in data.get('rows',[])}
     if refresh:
         for market in ('kr','us'):
-            missing=[tv for tv in selected if not tv.startswith('CRYPTO:') and (tv.startswith('KRX:'))==(market=='kr') and tv not in quotes]
+            missing=[tv for tv in selected if not tv.startswith(('CRYPTO:','BINANCE:')) and (tv.startswith('KRX:'))==(market=='kr') and tv not in quotes]
             if missing:
                 try:
                     rows=p.scan(market,p.COLUMNS,missing,limit=len(missing))['data']
                     for row in rows:
                         x=p.item(row);quotes[x['tv']]=dict(x,source='TradingView Screener',updated=p.now(),method='지연 시세 · 현재가 × 거래량 추정값')
                 except Exception:manifest['failures'].append('quotes-'+market)
-    if refresh:
-        for tv in selected:
-            if tv.startswith('CRYPTO:'):
-                try:quotes[tv]=p.stock(tv)
-                except Exception:manifest['failures'].append('quote:'+tv)
+    for x in coin_turnover.get('rows',[]):
+        quotes[x['tv']]=dict(x,source=coin_turnover['source'],stale=coin_turnover.get('stale',False),method=coin_turnover['method'])
     write('data-quotes.json',{'quotes':quotes});manifest['resources']['quotes']='data-quotes.json'
     def history(tv):
         name='data-history-'+tv.replace(':','-')+'.json'

@@ -5,6 +5,7 @@ from datetime import datetime, timezone, timedelta
 from urllib.parse import quote
 from cache import cached
 from symbols import CRYPTO_ROWS, crypto_rows, provider_symbol
+import coins
 SESSION = requests.Session()
 SESSION.headers['User-Agent'] = 'HongPick personal dashboard; contact: ' + (os.getenv('SEC_CONTACT') or 'hongpick@example.com')
 ALIASES = {'테슬라':'TSLA','애플':'AAPL','엔비디아':'NVDA','마이크로소프트':'MSFT','아마존':'AMZN','메타':'META','구글':'GOOGL','알파벳':'GOOGL','삼성전자':'005930','sk하이닉스':'000660','하이닉스':'000660','현대차':'005380','네이버':'035420','카카오':'035720','기아':'000270'}
@@ -84,20 +85,21 @@ def search(q):
                 else:continue
                 results.append((score,x))
         except Exception: errors.append(market)
-    results.extend((-1,x) for x in crypto_rows(q))
-    if not any(score==0 for score,x in results) and not crypto_rows(q):
+    if not any(score==0 for score,x in results):
         try:results.extend((0 if normalized(x['ticker'])==nq else 3,x) for x in remote_search(q))
         except Exception:errors.append('additional-search')
     prefix=q.split(':',1)[0].upper() if ':' in q else None
     results.sort(key=lambda x:(x[0],len(x[1]['name']),x[1]['tv']))
     unique={}
     for score,x in results:
+        if x.get('type')=='crypto':continue
         if prefix and not x['tv'].startswith(prefix+':'):continue
         unique.setdefault(x['tv'],x)
     return {'results':list(unique.values())[:20],'source':'TradingView / Yahoo Finance symbol search / crypto identifiers','error':'일부 제공원 연결 오류' if errors else None}
 
 def resolve(symbol):
     s=symbol.upper().strip()
+    if re.fullmatch(r'BINANCE:[A-Z0-9]{2,30}USDT',s):return s
     if re.fullmatch(r'CRYPTO:[A-Z0-9]{1,20}-USD',s):return s
     if re.fullmatch(r'(NASDAQ|NYSE|AMEX|KRX):[A-Z0-9.\-]{1,20}',s):return s
     s=re.sub(r'\.(KS|KQ)$','',s)
@@ -106,6 +108,7 @@ def resolve(symbol):
     return exact[0]['tv']
 
 def stock(tv):
+    if tv.startswith('BINANCE:'):return coins.stock(tv)
     if tv.startswith('CRYPTO:'):
         def crypto_quote():
             data=history(tv);rows=data['candles'];last=rows[-1];prior=rows[-2]['close'];price=last['close'];hi=max(x['high'] for x in rows[-365:])
@@ -129,6 +132,7 @@ def stock(tv):
 
 def history(tv,interval='D'):
     def load():
+        if tv.startswith('BINANCE:'):return coins.history(tv,'D')
         ticker=tv.split(':',1)[1];candles=[]
         if tv.startswith('KRX:'):
             start=(datetime.now(timezone.utc)-timedelta(days=780)).strftime('%Y%m%d');end=datetime.now(timezone.utc).strftime('%Y%m%d')

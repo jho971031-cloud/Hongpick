@@ -5,6 +5,7 @@ from cache import cached
 import providers
 
 def intraday_history(tv):
+    if tv.startswith('BINANCE:'):return providers.coins.history(tv,'1m')
     def load():
         ticker=tv.split(':',1)[1]
         symbols=[ticker+'.KS',ticker+'.KQ'] if tv.startswith('KRX:') else [providers.provider_symbol(tv)]

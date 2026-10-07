@@ -25,6 +25,14 @@ def fail(message,source=None):return jsonify(error=message,source=source),503
 def search():
     q=request.args.get('q','').strip()[:80]
     return jsonify(providers.search(q)if q else {'results':[]})
+@app.get('/api/coins')
+def coin_markets():
+    kind=request.args.get('kind','turnover')
+    if kind not in ['turnover','directory','search']:return jsonify(error='지원하지 않는 코인 데이터'),400
+    try:
+        if kind=='search':return jsonify(providers.coins.search(request.args.get('q','')[:80]))
+        return jsonify(providers.coins.directory() if kind=='directory' else providers.coins.tickers())
+    except Exception:return fail('바이낸스 코인 제공원 연결 오류 · 데이터 없음','Binance Spot')
 @app.get('/api/stock')
 def stock():
     try:return jsonify(providers.stock(providers.resolve(request.args.get('symbol','')[:40])))
@@ -102,7 +110,7 @@ def performance():
         return jsonify(change=(rows[-1]['close']/rows[0]['close']-1)*100,baselineDate=rows[0]['time'],baseline=rows[0]['close'],latestDate=rows[-1]['time'],latest=rows[-1]['close'],source=d['source'],method='공개일 이후 첫 거래일 종가 → 최신 일봉 종가. 배당 미포함 가격 변화.')
     except Exception:return fail('공개 이후 가격 변화 데이터 없음')
 @app.get('/health')
-def health():return jsonify(status='ok',version='5.7')
+def health():return jsonify(status='ok',version='6.0')
 @app.get('/')
 def home():return send_from_directory(BASE,'index.html')
 @app.get('/<path:name>')
@@ -114,4 +122,5 @@ def files(name):
     if name.startswith('api/'):return jsonify(error='API not found'),404
     return send_from_directory(BASE,'index.html')
 if __name__=='__main__':app.run(host='0.0.0.0',port=int(os.environ.get('PORT',5000)))
+
 

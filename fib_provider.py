@@ -8,6 +8,7 @@ finite=providers.finite
 now=providers.now
 
 def fibonacci_history(tv):
+    if tv.startswith('BINANCE:'):return providers.coins.history(tv,'W')
     """Completed 10-year weekly bars used only by the automatic channel tool."""
     def load():
         ticker=tv.split(':',1)[1];candles=[];today=datetime.now(timezone.utc)
