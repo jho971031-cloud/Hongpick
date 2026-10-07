@@ -33,6 +33,7 @@ def build(output,refresh=False,cache_dir=None):
         return data
     turns={m:collect('turnover-'+m,lambda m=m:p.turnover(m),'data-turnover-'+m+'.json') for m in ('kr','us')}
     for m in ('kr','us'):collect('directory-'+m,lambda m=m:p.directory(m),'data-directory-'+m+'.json')
+    write('data-directory-crypto.json',{'rows':p.CRYPTO_ROWS,'source':'Yahoo Finance crypto USD identifiers','updated':p.now()});manifest['resources']['directory-crypto']='data-directory-crypto.json'
     write('data-aliases.json',p.ALIASES);manifest['resources']['aliases']='data-aliases.json'
     indexes=[collect('index-'+seed,lambda t=t,n=n,s=seed:p.index_quote(t,n,s),'data-index-'+seed+'.json') for t,n,seed in p.INDEXES]
     write('data-overview.json',{'rows':indexes});manifest['resources']['overview']='data-overview.json'
@@ -52,16 +53,22 @@ def build(output,refresh=False,cache_dir=None):
     selected.update(x['tv'] for inv in investors for x in inv.get('holdings',[])[:10] if x.get('tv'))
     selected.update(x['tv'] for x in trump.get('rows',[]) if x.get('tv'))
     selected.update(('KRX:005930','KRX:000660','NASDAQ:NVDA','NASDAQ:AAPL','NASDAQ:TSLA','NYSE:IBM','AMEX:SPY'))
+    selected.update(('NASDAQ:RGTI','CRYPTO:BTC-USD','CRYPTO:ETH-USD','CRYPTO:SOL-USD'))
     quotes={x['tv']:dict(x,source=data['source'],updated=data.get('updated'),stale=data.get('stale',False),method=data.get('method')) for data in turns.values() for x in data.get('rows',[])}
     if refresh:
         for market in ('kr','us'):
-            missing=[tv for tv in selected if (tv.startswith('KRX:'))==(market=='kr') and tv not in quotes]
+            missing=[tv for tv in selected if not tv.startswith('CRYPTO:') and (tv.startswith('KRX:'))==(market=='kr') and tv not in quotes]
             if missing:
                 try:
                     rows=p.scan(market,p.COLUMNS,missing,limit=len(missing))['data']
                     for row in rows:
                         x=p.item(row);quotes[x['tv']]=dict(x,source='TradingView Screener',updated=p.now(),method='지연 시세 · 현재가 × 거래량 추정값')
                 except Exception:manifest['failures'].append('quotes-'+market)
+    if refresh:
+        for tv in selected:
+            if tv.startswith('CRYPTO:'):
+                try:quotes[tv]=p.stock(tv)
+                except Exception:manifest['failures'].append('quote:'+tv)
     write('data-quotes.json',{'quotes':quotes});manifest['resources']['quotes']='data-quotes.json'
     def history(tv):
         name='data-history-'+tv.replace(':','-')+'.json'
@@ -85,4 +92,5 @@ def build(output,refresh=False,cache_dir=None):
 if __name__=='__main__':
     parser=argparse.ArgumentParser();parser.add_argument('--output',default='public');parser.add_argument('--refresh',action='store_true');parser.add_argument('--cache-dir')
     args=parser.parse_args();build(args.output,args.refresh,args.cache_dir)
+
 

@@ -7,7 +7,7 @@ import providers
 def intraday_history(tv):
     def load():
         ticker=tv.split(':',1)[1]
-        symbols=[ticker+'.KS',ticker+'.KQ'] if tv.startswith('KRX:') else [ticker.replace('.','-')]
+        symbols=[ticker+'.KS',ticker+'.KQ'] if tv.startswith('KRX:') else [providers.provider_symbol(tv)]
         for symbol in symbols:
             try:
                 response=providers.SESSION.get('https://query1.finance.yahoo.com/v8/finance/chart/'+quote(symbol,safe=''),params={'range':'5d','interval':'1m','includePrePost':'false'},timeout=12)
@@ -21,3 +21,4 @@ def intraday_history(tv):
             except Exception:continue
         raise RuntimeError('분봉 제공원 데이터 없음')
     return cached('intraday-v1:'+tv,60,load,'data-intraday-'+tv.replace(':','-')+'.json')
+

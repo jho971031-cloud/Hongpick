@@ -4,9 +4,11 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone, timedelta
 from urllib.parse import quote
 from cache import cached
+from symbols import CRYPTO_ROWS, crypto_rows, provider_symbol
 SESSION = requests.Session()
 SESSION.headers['User-Agent'] = 'HongPick personal dashboard; contact: ' + (os.getenv('SEC_CONTACT') or 'hongpick@example.com')
 ALIASES = {'테슬라':'TSLA','애플':'AAPL','엔비디아':'NVDA','마이크로소프트':'MSFT','아마존':'AMZN','메타':'META','구글':'GOOGL','알파벳':'GOOGL','삼성전자':'005930','sk하이닉스':'000660','하이닉스':'000660','현대차':'005380','네이버':'035420','카카오':'035720','기아':'000270'}
+ALIASES.update({'리게티':'RGTI','리게티컴퓨팅':'RGTI','리게티 컴퓨팅':'RGTI'})
 COLUMNS = ['name','description','exchange','type','close','change','volume','Value.Traded','RSI','price_52_week_high','relative_volume_10d_calc','currency','update_mode']
 
 def now(): return datetime.now(timezone.utc).isoformat()
@@ -45,8 +47,28 @@ def directory(market):
         return {'rows':rows,'source':'TradingView symbol directory','updated':now()}
     return cached('directory:'+market,86400,load,'data-directory-'+market+'.json')
 
-def normalized(q):return re.sub(r'[\s.,&\-]','',q.casefold())
+def normalized(q):return re.sub(r'[\s.,&\-]','',str(q or '').casefold())
+def remote_search(q):
+    """Additional candidates only; never guess an exchange for an unknown ticker."""
+    def load():
+        r=SESSION.get('https://query1.finance.yahoo.com/v1/finance/search',params={'q':ALIASES.get(q.casefold(),q),'quotesCount':20,'newsCount':0},timeout=8);r.raise_for_status()
+        exchanges={'NMS':'NASDAQ','NGM':'NASDAQ','NCM':'NASDAQ','NAS':'NASDAQ','NYQ':'NYSE','NYSE':'NYSE','ASE':'AMEX','AMEX':'AMEX','PCX':'AMEX','BTS':'AMEX'}
+        out=[]
+        for x in r.json().get('quotes',[]):
+            symbol=x.get('symbol','');name=x.get('longname') or x.get('shortname') or symbol;typ=x.get('quoteType')
+            if not symbol:continue
+            if typ=='CRYPTOCURRENCY' and symbol.endswith('-USD'):
+                tv='CRYPTO:'+symbol;out.append(dict(tv=tv,symbol=tv,ticker=symbol[:-4],name=name,exchange='암호화폐 USD 종합',type='crypto',providerSymbol=symbol));continue
+            if typ not in ('EQUITY','ETF'):continue
+            exchange=exchanges.get(x.get('exchange'))
+            if symbol.endswith(('.KS','.KQ')):exchange='KRX';symbol=symbol[:-3]
+            if not exchange:continue
+            tv=exchange+':'+symbol;out.append(dict(tv=tv,symbol=tv,ticker=symbol,name=name,exchange=exchange,type='fund' if typ=='ETF' else 'stock'))
+        return out
+    return cached('search-candidates-v1:'+q.casefold(),3600,load)
 def search(q):
+    q=q.strip()
+    if not q:return {'results':[]}
     nq=normalized(q);alias=ALIASES.get(q.casefold());results=[];errors=[]
     markets=['kr'] if re.search('[가-힣]',q) or q.isdigit() else ['us','kr']
     if alias: markets=['kr'] if alias.isdigit() else ['us']
@@ -62,11 +84,21 @@ def search(q):
                 else:continue
                 results.append((score,x))
         except Exception: errors.append(market)
+    results.extend((-1,x) for x in crypto_rows(q))
+    if not any(score==0 for score,x in results) and not crypto_rows(q):
+        try:results.extend((0 if normalized(x['ticker'])==nq else 3,x) for x in remote_search(q))
+        except Exception:errors.append('additional-search')
+    prefix=q.split(':',1)[0].upper() if ':' in q else None
     results.sort(key=lambda x:(x[0],len(x[1]['name']),x[1]['tv']))
-    return {'results':[x[1]for x in results[:20]],'source':'TradingView symbol directory / Korean name aliases','error':'일부 제공원 연결 오류' if errors else None}
+    unique={}
+    for score,x in results:
+        if prefix and not x['tv'].startswith(prefix+':'):continue
+        unique.setdefault(x['tv'],x)
+    return {'results':list(unique.values())[:20],'source':'TradingView / Yahoo Finance symbol search / crypto identifiers','error':'일부 제공원 연결 오류' if errors else None}
 
 def resolve(symbol):
     s=symbol.upper().strip()
+    if re.fullmatch(r'CRYPTO:[A-Z0-9]{1,20}-USD',s):return s
     if re.fullmatch(r'(NASDAQ|NYSE|AMEX|KRX):[A-Z0-9.\-]{1,20}',s):return s
     s=re.sub(r'\.(KS|KQ)$','',s)
     found=search(s)['results'];exact=[x for x in found if x['ticker']==s]
@@ -74,6 +106,20 @@ def resolve(symbol):
     return exact[0]['tv']
 
 def stock(tv):
+    if tv.startswith('CRYPTO:'):
+        def crypto_quote():
+            data=history(tv);rows=data['candles'];last=rows[-1];prior=rows[-2]['close'];price=last['close'];hi=max(x['high'] for x in rows[-365:])
+            gain=loss=0
+            for i in range(1,len(rows)):
+                change=rows[i]['close']-rows[i-1]['close'];g=max(change,0);l=max(-change,0)
+                if i<=14:
+                    gain+=g;loss+=l
+                    if i==14:gain/=14;loss/=14
+                else:gain=(gain*13+g)/14;loss=(loss*13+l)/14
+            rsi=(100 if gain else 50) if loss==0 else 100-100/(1+gain/loss)
+            coin=next((x for x in CRYPTO_ROWS if x['tv']==tv),{'name':provider_symbol(tv),'ticker':provider_symbol(tv)[:-4]})
+            return dict(coin,tv=tv,symbol=tv,price=price,change=(price/prior-1)*100,rsi=rsi,drawdown=(price/hi-1)*100,high52=hi,currency='USD',turnover=None,volume=last['volume'],source=data['source'],updated=data['updated'],stale=data.get('stale',False),method='암호화폐 USD 종합 일봉 · 진행 중인 UTC 일봉 포함 · 거래대금 순위 없음')
+        return cached('crypto-quote:'+tv,90,crypto_quote)
     market='kr' if tv.startswith('KRX:') else 'us'
     def load():
         d=scan(market,COLUMNS,[tv]);rows=d.get('data',[])
@@ -92,11 +138,11 @@ def history(tv,interval='D'):
                     candles.append({'time':datetime.strptime(str(x[0]),'%Y%m%d').date().isoformat(),'open':x[1],'high':x[2],'low':x[3],'close':x[4],'volume':x[5]})
             source='NAVER Finance daily OHLCV';source_url='https://finance.naver.com/item/main.naver?code='+ticker
         else:
-            r=SESSION.get('https://query1.finance.yahoo.com/v8/finance/chart/'+quote(ticker.replace('.','-'),safe=''),params={'range':'2y','interval':'1d'},timeout=15);r.raise_for_status();d=r.json()['chart']['result'][0];z=d['indicators']['quote'][0]
+            r=SESSION.get('https://query1.finance.yahoo.com/v8/finance/chart/'+quote(provider_symbol(tv),safe=''),params={'range':'2y','interval':'1d'},timeout=15);r.raise_for_status();d=r.json()['chart']['result'][0];z=d['indicators']['quote'][0]
             for i,t in enumerate(d.get('timestamp',[])):
                 vals=[finite(z[k][i]) for k in ['open','high','low','close']]
                 if all(v is not None for v in vals):candles.append(dict(zip(['open','high','low','close'],vals),time=datetime.fromtimestamp(t,timezone.utc).date().isoformat(),volume=finite(z['volume'][i]) or 0))
-            source='Yahoo Finance daily OHLCV';source_url='https://finance.yahoo.com/quote/'+quote(ticker.replace('.','-'),safe='')
+            source='Yahoo Finance crypto USD daily OHLCV' if tv.startswith('CRYPTO:') else 'Yahoo Finance daily OHLCV';source_url='https://finance.yahoo.com/quote/'+quote(provider_symbol(tv),safe='')
         candles=sorted({x['time']:x for x in candles if x['close']>0}.values(),key=lambda x:x['time'])
         if len(candles)<2:raise ValueError('OHLCV unavailable')
         return {'candles':candles,'source':source,'sourceUrl':source_url,'updated':now(),'lastBar':candles[-1]['time'],'interval':'D','adjustment':'제공원 OHLCV 기준. 기업행사에 따라 제공원별 조정 방식이 다를 수 있습니다.'}
@@ -156,4 +202,5 @@ def overview():
         except Exception:return {'name':args[1],'error':'데이터 없음'}
     with ThreadPoolExecutor(max_workers=3)as pool:rows=list(pool.map(one,INDEXES))
     return {'rows':rows}
+
 

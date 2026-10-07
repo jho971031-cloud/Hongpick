@@ -4,7 +4,7 @@ window.HongData=(()=>{
  const apiBase=staticMode?'https://hongpick.onrender.com':location.origin;
  const entries=new Map(),pending=new Map();let revision=null;
  let fallback=true;try{fallback=localStorage.getItem('hongpick.apiFallback')!=='off'}catch{}
- const normalize=q=>q.toLowerCase().replace(/[\s.,&\-]/g,'');
+ const normalize=q=>String(q||'').toLowerCase().replace(/[\s.,&\-]/g,'');
  function setFallback(value){fallback=!!value;try{localStorage.setItem('hongpick.apiFallback',fallback?'on':'off')}catch{}clear()}
  function clear(){entries.clear();revision=null}
  async function json(url,ttl=300000){
@@ -20,13 +20,18 @@ window.HongData=(()=>{
  async function file(name){const url=new URL(name,base);if(revision)url.searchParams.set('v',revision);return json(url)}
  async function resource(key){const m=await manifest();if(!m.resources[key])throw Error('데이터 없음');return file(m.resources[key])}
  async function search(q){
-  const aliases=await resource('aliases'),alias=aliases[q.toLowerCase()],query=normalize(alias||q.split(':').at(-1)),nq=normalize(q);
+  q=q.trim();if(!q)return {results:[]};
+  let aliases={};try{aliases=await resource('aliases')}catch{}
+  const alias=aliases[q.toLowerCase()],query=normalize(alias||q.split(':').at(-1)),nq=normalize(q),prefix=q.includes(':')?q.split(':')[0].toUpperCase():null;
   const markets=alias?[/^\d+$/.test(alias)?'kr':'us']:/[가-힣]/.test(q)||/^\d+$/.test(q)?['kr']:['us','kr'];
   const results=[],errors=[];
-  await Promise.all(markets.map(async market=>{try{const d=await resource('directory-'+market);for(const x of d.rows){const ticker=normalize(x.ticker),name=normalize(x.name);let score;if(query===ticker)score=0;else if(nq===name)score=1;else if(ticker.startsWith(query))score=2;else if(name.includes(nq))score=3;else if(ticker.includes(query))score=4;else continue;results.push({score,x})}}catch{errors.push(market)}}));
+  const add=(x,score)=>{if(x?.tv&&(!prefix||x.tv.startsWith(prefix+':')))results.push({score,x})};
+  await Promise.all([...markets.map(async market=>{try{const d=await resource('directory-'+market);for(const x of d.rows||[]){const ticker=normalize(x.ticker),name=normalize(x.name);let score;if(query===ticker)score=0;else if(nq===name)score=1;else if(ticker.startsWith(query))score=2;else if(name.includes(nq))score=3;else if(ticker.includes(query))score=4;else continue;add(x,score)}}catch{errors.push(market)}}),
+   (async()=>{try{const d=await file('data-directory-crypto.json');for(const x of d.rows||[]){const labels=[x.ticker,x.providerSymbol,x.ticker+'USD',x.ticker+'USDT',...x.name.split(/\s*·\s*/)].map(normalize);if(labels.includes(nq)||labels.includes(query))add(x,-1);else if(labels.some(v=>v.includes(nq)))add(x,3)}}catch{}})()]);
+  // Exact directory matches remain usable if the additional provider is unavailable.
+  if(fallback&&!results.some(v=>v.score<=0)){try{const d=await json(new URL('/api/search?q='+encodeURIComponent(q),apiBase),3600000);for(const x of d.results||[])add(x,normalize(x.ticker)===query?0:3)}catch(error){if(!results.length)throw error}}
   results.sort((a,b)=>a.score-b.score||a.x.name.length-b.x.name.length||a.x.tv.localeCompare(b.x.tv));
-  if(!results.length&&fallback)return json(new URL('/api/search?q='+encodeURIComponent(q),apiBase));
-  return {results:results.slice(0,20).map(v=>v.x),source:'TradingView symbol directory / Korean name aliases',error:errors.length?'일부 종목 목록 데이터 없음':null};
+  return {results:[...new Map(results.map(v=>[v.x.tv,v.x])).values()].slice(0,20),source:'TradingView / Yahoo Finance / crypto USD identifiers',error:errors.length?'일부 종목 목록 데이터 없음':null};
  }
  function aggregate(data,interval){
   if(interval==='D')return data;if(!['W','M'].includes(interval))throw Error('지원하지 않는 주기');const groups=new Map();
@@ -56,3 +61,4 @@ window.HongData=(()=>{
  function asset(name){return new URL(name,base).href}
  return {api,clear,aggregate,asset,staticMode,setFallback,get fallback(){return fallback},manifest};
 })();
+

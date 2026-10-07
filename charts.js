@@ -2,8 +2,8 @@
 window.HongIndicators = {
  ma(candles, period) { let sum=0;const rows=[];candles.forEach((c,i)=>{sum+=c.close;if(i>=period)sum-=candles[i-period].close;if(i>=period-1)rows.push({time:c.time,value:sum/period})});return rows; },
  rsi(candles,period=14) {let g=0,l=0;const out=[];for(let i=1;i<candles.length;i++){const d=candles[i].close-candles[i-1].close;if(i<=period){g+=Math.max(d,0);l+=Math.max(-d,0);if(i<period)continue;g/=period;l/=period}else{g=(g*(period-1)+Math.max(d,0))/period;l=(l*(period-1)+Math.max(-d,0))/period}out.push({time:candles[i].time,value:l===0?(g===0?50:100):100-100/(1+g/l)})}return out;},
- ichimoku(candles,interval='D') {
-  const times=candles.map(c=>c.time),minute=interval.endsWith('m');let d=new Date(minute?times.at(-1)*1000:times.at(-1)+'T12:00:00Z');for(let i=0;i<26;i++){if(minute)d=new Date(d.getTime()+parseInt(interval)*60000);else if(interval==='M')d.setUTCMonth(d.getUTCMonth()+1);else if(interval==='W')d.setUTCDate(d.getUTCDate()+7);else{do{d.setUTCDate(d.getUTCDate()+1)}while([0,6].includes(d.getUTCDay()))}times.push(minute?Math.floor(d.getTime()/1000):d.toISOString().slice(0,10))}
+ ichimoku(candles,interval='D',continuous=false) {
+  const times=candles.map(c=>c.time),minute=interval.endsWith('m');let d=new Date(minute?times.at(-1)*1000:times.at(-1)+'T12:00:00Z');for(let i=0;i<26;i++){if(minute)d=new Date(d.getTime()+parseInt(interval)*60000);else if(interval==='M')d.setUTCMonth(d.getUTCMonth()+1);else if(interval==='W')d.setUTCDate(d.getUTCDate()+7);else{do{d.setUTCDate(d.getUTCDate()+1)}while(!continuous&&[0,6].includes(d.getUTCDay()))}times.push(minute?Math.floor(d.getTime()/1000):d.toISOString().slice(0,10))}
   const midpoint=(i,p)=>{if(i<p-1)return null;let hi=-Infinity,lo=Infinity;for(let j=i-p+1;j<=i;j++){hi=Math.max(hi,candles[j].high);lo=Math.min(lo,candles[j].low)}return(hi+lo)/2};const conversion=[],base=[],spanA=[],spanB=[],lag=[];
   candles.forEach((c,i)=>{const t=midpoint(i,9),k=midpoint(i,26),b=midpoint(i,52);if(t!=null)conversion.push({time:c.time,value:t});if(k!=null)base.push({time:c.time,value:k});if(t!=null&&k!=null)spanA.push({time:times[i+26],value:(t+k)/2});if(b!=null)spanB.push({time:times[i+26],value:b});if(i>=26)lag.push({time:times[i-26],value:c.close})});
   return {conversion,base,spanA,spanB,lag};
@@ -52,9 +52,9 @@ function referencePosition(time,weekly){
  return i+(t-a)/(b-a);
 }
 // Drawing-only future coordinates; no fabricated OHLCV candles.
-function channelExtension(candles,interval,count=52){
+function channelExtension(candles,interval,count=52,continuous=false){
  const result=candles.map(c=>({time:c.time})),minute=interval.endsWith('m');let date=new Date(minute?candles.at(-1).time*1000:candles.at(-1).time+'T12:00:00Z');
- for(let i=0;i<count;i++){if(minute)date=new Date(date.getTime()+parseInt(interval)*60000);else if(interval==='M'){date.setUTCDate(1);date.setUTCMonth(date.getUTCMonth()+1)}else if(interval==='W')date.setUTCDate(date.getUTCDate()+7);else{do{date.setUTCDate(date.getUTCDate()+1)}while([0,6].includes(date.getUTCDay()))}result.push({time:minute?Math.floor(date.getTime()/1000):date.toISOString().slice(0,10)})}return result;
+ for(let i=0;i<count;i++){if(minute)date=new Date(date.getTime()+parseInt(interval)*60000);else if(interval==='M'){date.setUTCDate(1);date.setUTCMonth(date.getUTCMonth()+1)}else if(interval==='W')date.setUTCDate(date.getUTCDate()+7);else{do{date.setUTCDate(date.getUTCDate()+1)}while(!continuous&&[0,6].includes(date.getUTCDay()))}result.push({time:minute?Math.floor(date.getTime()/1000):date.toISOString().slice(0,10)})}return result;
 }
 function channelPrice(candidate,weekly,time,ratio=0){return Math.exp(Math.log(candidate.anchors[0].price)+candidate.slope*(referencePosition(time,weekly)-candidate.a)+ratio*candidate.width)}
 // After the last real bar, continue the visible tangent by chart bar index.
@@ -117,11 +117,11 @@ window.HongChart=class {
   const L=LightweightCharts,add=(data,color,pane=0,extra={})=>{const series=this.chart.addSeries(L.LineSeries,{color,lineWidth:1,lastValueVisible:false,priceLineVisible:false,crosshairMarkerVisible:false,...extra},pane);series.setData(data);this.series.push(series);return series};
   const colors={20:'#f4c95d',60:'#58adff',120:'#b58eff',200:'#f790ad'};
   for(const period of this.options.ma)add(HongIndicators.ma(this.data.candles,period),colors[period]);
-  if(this.options.ichi){const d=HongIndicators.ichimoku(this.data.candles,this.interval);add(d.conversion,'#4d9bff');add(d.base,'#ff765d');add(d.spanA,'#16d79b');add(d.spanB,'#ff526d');add(d.lag,'#bb8ae8');this.cloud=new IchimokuCloud(d.spanA,d.spanB);this.candles.attachPrimitive(this.cloud)}
+  if(this.options.ichi){const d=HongIndicators.ichimoku(this.data.candles,this.interval,this.item?.type==='crypto');add(d.conversion,'#4d9bff');add(d.base,'#ff765d');add(d.spanA,'#16d79b');add(d.spanB,'#ff526d');add(d.lag,'#bb8ae8');this.cloud=new IchimokuCloud(d.spanA,d.spanB);this.candles.attachPrimitive(this.cloud)}
   if(this.options.fib!=='off'){
    const candidate=this.selectedCandidate;this.fibCandidate=candidate;
    if(candidate){
-    const palette={0:'#92989f',.5:'#52bd58',1:'#ff515b',1.5:'#00a98d',2:'#ffad16',2.5:'#00bdd9',3:'#92989f'},extended=channelExtension(this.data.candles,this.interval);
+    const palette={0:'#92989f',.5:'#52bd58',1:'#ff515b',1.5:'#00a98d',2:'#ffad16',2.5:'#00bdd9',3:'#92989f'},extended=channelExtension(this.data.candles,this.interval,52,this.item?.type==='crypto');
     const priceAt=channelProjection(candidate,this.referenceData.candles,extended,this.data.candles.length);
     for(const [ratio,color] of Object.entries(palette)){const r=Number(ratio),data=[];for(let i=0;i<extended.length;i++){const value=priceAt(i,r);if(Number.isFinite(value)&&value>0)data.push({time:extended[i].time,value})}add(data,color,0,{lineWidth:r===0||r===1?2:1,lastValueVisible:true,title:String(r),autoscaleInfoProvider:()=>null})}
     const first=chartSeconds(this.data.candles[0].time),last=chartSeconds(this.data.candles.at(-1).time),markers=candidate.anchors.filter(x=>chartSeconds(x.time)>=first&&chartSeconds(x.time)<=last).map((x,i)=>{const nearest=this.data.candles.reduce((best,row)=>Math.abs(chartSeconds(row.time)-chartSeconds(x.time))<Math.abs(chartSeconds(best.time)-chartSeconds(x.time))?row:best);return {time:nearest.time,position:this.options.fib==='high'?'aboveBar':'belowBar',color:'#edf7ff',shape:'circle',text:['①','②','③'][x.point-1]}});
@@ -151,5 +151,6 @@ window.HongChart=class {
 
  resize(){if(this.chart)this.chart.resize(this.element.clientWidth,this.element.clientHeight)}
 };
+
 
 
