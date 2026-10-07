@@ -15,9 +15,20 @@ window.HongIndicators = {
   const piv=[];for(let i=near;i<n-near-1;i++)if(rows[i].high===Math.max(...rows.slice(i-near,i+near+1).map(x=>x.high)))piv.push(i);
   const found=[];
   for(const b of piv){
-   const next=piv.find(i=>i>b)??n,ks=[];for(let i=b+1;i<Math.min(b+(monthly?7:21),next+1,n-1);i++)if(rows[i].close>rows[b].high*1.01&&rows[i+1].close>rows[b].high*1.01)ks.push(i);
-   if(!ks.length)continue;const turn=ks[0],prior=piv.filter(i=>i<turn).at(-1);if(prior!==b)continue;
-   const cs=piv.filter(i=>i>turn+1&&i>=major&&i+major<n&&rows[i].high===Math.max(...rows.slice(i-major,i+major+1).map(x=>x.high))&&Math.min(...rows.slice(i+1,i+major+1).map(x=>x.low))<=rows[i].high*(1-retrace));
+   // A structural rebound high may be followed by several smaller pivots.
+   // Keep the last significant resistance before the sustained reversal.
+   const prominence=monthly?1:daily?5:8;
+   if(b<prominence||b+prominence>=n||rows[b].high<Math.max(...rows.slice(b-prominence,b+prominence+1).map(x=>x.high))*.995)continue;
+   let turn=null;const wait=monthly?12:daily?100:52;
+   for(let i=b+2;i<Math.min(b+wait,n-1);i++){
+    if(rows[i].close>rows[b].high*1.01&&rows[i+1].close>rows[b].high*1.01){turn=i;break}
+   }
+   if(turn==null)continue;
+   if(piv.some(i=>i>b&&i<turn&&rows[i].high>=rows[b].high*.995))continue;
+   const baseLow=Math.min(...rows.slice(b+1,turn+1).map(x=>x.low));
+   if(baseLow>rows[b].high*(1-(daily?.04:monthly?.06:.08)))continue;
+   const peakWindow=monthly?3:daily?10:13;
+   const cs=piv.filter(i=>i>turn+1&&i>=peakWindow&&i+peakWindow<n&&rows[i].high===Math.max(...rows.slice(i-peakWindow,i+peakWindow+1).map(x=>x.high))&&Math.min(...rows.slice(i+1,i+peakWindow+1).map(x=>x.low))<=rows[i].high*(1-retrace));
    if(!cs.length)continue;const c=cs[0];if(c-turn>(monthly?12:65))continue;
    for(const a of piv){
     if(b-a<minGap||b-a>maxGap||rows[b].high>=rows[a].high*.98)continue;
@@ -29,7 +40,7 @@ window.HongIndicators = {
     let slope=(Math.log(rows[b].high)-Math.log(ceiling))/(b-a),width=Math.log(rows[c].high)-Math.log(ceiling)-slope*(c-a);if(width<=0)continue;
     let zone={from:touches[0],to:touches.at(-1),floor:ceiling*.94,ceiling:ceiling*1.01};
     if(mode==='low'){slope=-slope;width=-width;zone={from:zone.from,to:zone.to,floor:1/zone.ceiling,ceiling:1/zone.floor}}
-    found.push({mode,a,b,c,turn,slope,width,zone,score:swing*100+Math.min(b-a,156)*.12+touches.length*.5+c*.015,anchors:[a,b,c].map((index,j)=>({point:j+1,index,time:source[index].time,price:mode==='high'?source[index].high:source[index].low}))});
+    found.push({mode,a,b,c,turn,slope,width,zone,score:swing*100+Math.min(b-a,156)*.12+touches.length*.5-(n-1-c)*(daily?.06:monthly?1:.3),anchors:[a,b,c].map((index,j)=>({point:j+1,index,time:source[index].time,price:mode==='high'?source[index].high:source[index].low}))});
    }
   }
   const final=new Map();for(const x of found){const key=x.a+':'+x.c,old=final.get(key);if(!old||x.b>old.b)final.set(key,x)}

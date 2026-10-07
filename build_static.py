@@ -53,7 +53,7 @@ def build(output,refresh=False,cache_dir=None):
     selected.update(x['tv'] for inv in investors for x in inv.get('holdings',[])[:10] if x.get('tv'))
     selected.update(x['tv'] for x in trump.get('rows',[]) if x.get('tv'))
     selected.update(('KRX:005930','KRX:000660','NASDAQ:NVDA','NASDAQ:AAPL','NASDAQ:TSLA','NYSE:IBM','AMEX:SPY'))
-    selected.update(('NASDAQ:RGTI','CRYPTO:BTC-USD','CRYPTO:ETH-USD','CRYPTO:SOL-USD'))
+    selected.update(('NYSE:GS','NASDAQ:RGTI','CRYPTO:BTC-USD','CRYPTO:ETH-USD','CRYPTO:SOL-USD'))
     quotes={x['tv']:dict(x,source=data['source'],updated=data.get('updated'),stale=data.get('stale',False),method=data.get('method')) for data in turns.values() for x in data.get('rows',[])}
     if refresh:
         for market in ('kr','us'):
