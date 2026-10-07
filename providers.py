@@ -95,11 +95,11 @@ def search(q):
         if x.get('type')=='crypto':continue
         if prefix and not x['tv'].startswith(prefix+':'):continue
         unique.setdefault(x['tv'],x)
-    return {'results':list(unique.values())[:20],'source':'TradingView / Yahoo Finance symbol search / crypto identifiers','error':'일부 제공원 연결 오류' if errors else None}
+    return {'results':list(unique.values())[:20],'source':'TradingView / Yahoo Finance · 주식 검색','error':'일부 제공원 연결 오류' if errors else None}
 
 def resolve(symbol):
     s=symbol.upper().strip()
-    if re.fullmatch(r'BINANCE:[A-Z0-9]{2,30}USDT',s):return s
+    if re.fullmatch(r'BINANCE:[A-Z0-9]{1,30}USDT',s):return s
     if re.fullmatch(r'CRYPTO:[A-Z0-9]{1,20}-USD',s):return s
     if re.fullmatch(r'(NASDAQ|NYSE|AMEX|KRX):[A-Z0-9.\-]{1,20}',s):return s
     s=re.sub(r'\.(KS|KQ)$','',s)

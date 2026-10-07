@@ -54,7 +54,7 @@ def search(q):
 
 def resolve(tv):
     symbol=tv.split(':')[-1].upper()
-    if not re.fullmatch(r'[A-Z0-9]{2,30}USDT',symbol):raise ValueError('바이낸스 USDT 현물 심볼을 선택해 주세요')
+    if not re.fullmatch(r'[A-Z0-9]{1,30}USDT',symbol):raise ValueError('바이낸스 USDT 현물 심볼을 선택해 주세요')
     return symbol
 
 def tickers():
