@@ -10,7 +10,7 @@ def build(output,refresh=False,cache_dir=None):
     output=Path(output);base_build(output,refresh,cache_dir)
     shutil.copy2(Path(__file__).resolve().parent/'fib-client.js',output/'fib-client.js')
     path=output/'data-manifest.json';manifest=json.loads(path.read_text(encoding='utf-8'))
-    manifest['version']='6.2.1';manifest['fibHistories']={};symbols=sorted(manifest.get('histories',{}))
+    manifest['version']='6.3';manifest['fibHistories']={};symbols=sorted(manifest.get('histories',{}))
     if refresh:
         with ThreadPoolExecutor(max_workers=3) as pool:
             jobs={pool.submit(p.fibonacci_history,tv):tv for tv in symbols}
