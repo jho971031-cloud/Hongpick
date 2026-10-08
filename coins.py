@@ -76,16 +76,16 @@ def stock(tv):
     return dict(row,source=d['source'],sourceUrl=d['sourceUrl'],stale=d.get('stale',False),method=d['method'])
 
 def history(tv,frame='D'):
-    symbol=resolve(tv);interval={'D':'1d','W':'1w','1m':'1m'}[frame]
+    symbol=resolve(tv);interval={'D':'1d','W':'1w','1m':'1m','15m':'15m'}[frame]
     def load():
         rows=[];stamp=datetime.now(timezone.utc).timestamp()*1000
         for x in get('klines',{'symbol':symbol,'interval':interval,'limit':1000}):
             if frame=='W' and x[6]>=stamp:continue
             vals=[float(v) for v in x[1:5]]
             if not all(math.isfinite(v) and v>0 for v in vals):continue
-            time=int(x[0]/1000) if frame=='1m' else datetime.fromtimestamp(x[0]/1000,timezone.utc).date().isoformat()
+            time=int(x[0]/1000) if frame in ('1m','15m') else datetime.fromtimestamp(x[0]/1000,timezone.utc).date().isoformat()
             rows.append(dict(zip(('open','high','low','close'),vals),time=time,volume=float(x[5])))
         if len(rows)<2:raise ValueError('바이낸스 캔들 데이터 부족')
         return dict(candles=rows,interval=frame,source='Binance Spot '+interval+' OHLCV',sourceUrl='https://www.binance.com/en/trade/'+symbol[:-4]+'_USDT?type=spot',updated=now(),lastBar=rows[-1]['time'],exchangeTimezone='UTC',completeWeeksOnly=frame=='W',adjustment='Binance 현물 원본 가격 · UTC · 일봉/분봉 진행 중인 봉 포함 · 주봉은 완료된 봉만 사용')
-    prefix={'D':'data-history-','W':'data-fib-history-','1m':'data-intraday-'}[frame]
-    return cached('binance-history-v1:'+symbol+':'+frame,120 if frame=='1m' else 21600 if frame=='W' else 900,load,prefix+tv.replace(':','-')+'.json')
+    prefix={'D':'data-history-','W':'data-fib-history-','1m':'data-intraday-','15m':'data-intraday15-'}[frame]
+    return cached('binance-history-v1:'+symbol+':'+frame,120 if frame in ('1m','15m') else 21600 if frame=='W' else 900,load,prefix+tv.replace(':','-')+'.json')

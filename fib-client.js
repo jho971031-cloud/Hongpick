@@ -3,10 +3,13 @@
  HongData.api=async path=>{
   const url=new URL(path,location.origin);
   if(url.pathname==='/api/history'&&['1m','5m','15m'].includes(url.searchParams.get('interval'))){
-   const tv=url.searchParams.get('symbol'),interval=url.searchParams.get('interval');let data;
-   if(HongData.staticMode){try{const m=await HongData.manifest(),record=m.intradayHistories?.[tv];if(record){const r=await fetch(HongData.asset(record.file),{cache:'no-store'});if(r.ok)data=await r.json()}}catch{}}
-   if(!data&&tv.startsWith('BINANCE:')&&HongData.fallback)data=await HongData.binanceBars(tv,'1m');
-   if(!data){if(HongData.staticMode&&!HongData.fallback)throw Error('해당 종목 분봉 데이터 없음 · 다음 수집을 기다리거나 API 보완을 켜 주세요.');const base=HongData.staticMode?'https://hongpick.onrender.com':location.origin,r=await fetch(base+'/api/intraday?symbol='+encodeURIComponent(tv));data=await r.json();if(!r.ok)throw Error(data.error||'분봉 데이터 없음')}
+   const tv=url.searchParams.get('symbol'),interval=url.searchParams.get('interval'),native=interval==='15m'?'15m':'1m';let data;
+   if(HongData.staticMode){try{const m=await HongData.manifest(),record=(native==='15m'?m.intraday15Histories:m.intradayHistories)?.[tv];if(record){const r=await fetch(HongData.asset(record.file),{cache:'no-store'});if(r.ok)data=await r.json()}}catch{}}
+   const snapshot=data;try{
+   if(native==='15m'&&data&&HongData.fallback&&Date.now()-data.candles.at(-1).time*1000>900000)data=null;
+   if(!data&&tv.startsWith('BINANCE:')&&HongData.fallback)data=await HongData.binanceBars(tv,native);
+   if(!data){if(HongData.staticMode&&!HongData.fallback)throw Error('해당 종목 분봉 데이터 없음 · 다음 수집을 기다리거나 API 보완을 켜 주세요.');const base=HongData.staticMode?'https://hongpick.onrender.com':location.origin,r=await fetch(base+'/api/intraday?symbol='+encodeURIComponent(tv)+'&interval='+native);data=await r.json();if(!r.ok)throw Error(data.error||'분봉 데이터 없음')}
+   }catch(error){if(snapshot?.candles?.length)data={...snapshot,stale:true,notice:'제공원 연결 오류 · 마지막 실제 분봉'};else throw error}
    const seconds=parseInt(interval)*60,groups=new Map();for(const c of data.candles){const time=Math.floor(c.time/seconds)*seconds,old=groups.get(time);if(!old)groups.set(time,{...c,time});else{old.high=Math.max(old.high,c.high);old.low=Math.min(old.low,c.low);old.close=c.close;old.volume+=c.volume}}
    return {...data,candles:[...groups.values()],interval};
   }

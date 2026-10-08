@@ -8,7 +8,50 @@ window.HongIndicators = {
   candles.forEach((c,i)=>{const t=midpoint(i,9),k=midpoint(i,26),b=midpoint(i,52);if(t!=null)conversion.push({time:c.time,value:t});if(k!=null)base.push({time:c.time,value:k});if(t!=null&&k!=null)spanA.push({time:times[i+26],value:(t+k)/2});if(b!=null)spanB.push({time:times[i+26],value:b});if(i>=26)lag.push({time:times[i-26],value:c.close})});
   return {conversion,base,spanA,spanB,lag};
  },
+ intradayFibonacci(candles,mode='high',settings={}) {
+  if(!['high','low'].includes(mode)||candles.length<30)return null;
+  // Work only with completed bars. The forming candle is never an anchor.
+  const source=candles.slice(-240),offset=candles.length-source.length,n=source.length;
+  const rows=mode==='low'?source.map(c=>({...c,open:1/c.open,high:1/c.low,low:1/c.high,close:1/c.close})):source;
+  const ranges=rows.slice(-30).map((c,j)=>{const i=n-Math.min(30,n)+j,prev=rows[Math.max(0,i-1)].close;return Math.max(Math.log(c.high/c.low),Math.abs(Math.log(c.high/prev)),Math.abs(Math.log(c.low/prev)))});
+  const noise=Math.max(.0005,Math.min(.04,ranges.reduce((a,b)=>a+b,0)/ranges.length)),piv=[];
+  for(let i=2;i<n-2;i++)if(rows[i].high===Math.max(...rows.slice(i-2,i+3).map(x=>x.high)))piv.push(i);
+  const found=[];
+  for(const b of piv){
+   if(b<6||b+3>=n||b<n-140||rows[b].high<Math.max(...rows.slice(b-3,b+4).map(x=>x.high))*Math.exp(-noise*.2))continue;
+   let turn=null;
+   for(let i=b+2;i<Math.min(b+40,n-2);i++)if(rows[i].close>rows[b].high*Math.exp(noise*.25)&&rows[i+1].close>rows[b].high*Math.exp(noise*.25)){turn=i;break}
+   if(turn==null||turn<n-100||piv.some(i=>i>b&&i<turn&&rows[i].high>=rows[b].high*Math.exp(-noise*.2)))continue;
+   if(Math.min(...rows.slice(b+1,turn+1).map(x=>x.low))>rows[b].high*Math.exp(-noise))continue;
+   // The first meaningful post-turn pivot is point 3, not a later, higher peak.
+   const peaks=piv.filter(i=>i>turn+1&&i+3<n&&rows[i].high===Math.max(...rows.slice(i-3,i+4).map(x=>x.high))&&Math.min(...rows.slice(i+1,i+4).map(x=>x.low))<rows[i].high*Math.exp(-noise*.8));
+   let c=peaks[0],provisional=false;
+   if(c==null){c=turn+2;for(let i=c+1;i<n;i++)if(rows[i].high>rows[c].high)c=i;provisional=true}
+   if(c>=n||c-turn>48||n-1-c>64)continue;
+   for(const a of piv){
+    if(b-a<6||b-a>120||rows[b].high>=rows[a].high*Math.exp(-noise*.6))continue;
+    const ceiling=rows[a].high,touches=[];
+    for(let i=Math.max(0,a-12);i<=a+2;i++)if(Math.abs(Math.log(rows[i].high/ceiling))<=noise*.8)touches.push(i);
+    if(touches.length<2||touches.at(-1)-touches[0]<2)continue;
+    if(Math.max(...rows.slice(a+1,b+1).map(x=>x.high))>ceiling*Math.exp(noise))continue;
+    const swing=Math.log(ceiling/Math.min(...rows.slice(a+1,b+1).map(x=>x.low)));if(swing<noise*3)continue;
+    let slope=Math.log(rows[b].high/ceiling)/(b-a),width=Math.log(rows[c].high/ceiling)-slope*(c-a);
+    if(width<noise*.75||width>Math.max(.15,noise*12))continue;
+    const current=settings.currentPrice>0?(mode==='low'?1/settings.currentPrice:settings.currentPrice):rows.at(-1).close;
+    const position=(Math.log(current/ceiling)-slope*(n-1-a))/width;
+    if(position<-.35||position>3.35)continue;
+    const outside=rows.slice(-4).filter((x,j)=>{const p=(Math.log(x.close/ceiling)-slope*(n-4+j-a))/width;return p<-.75||p>3.75}).length;
+    if(outside>=3)continue;
+    let zone={from:touches[0]+offset,to:touches.at(-1)+offset,floor:ceiling*Math.exp(-noise*.8),ceiling:ceiling*Math.exp(noise*.8)};
+    if(mode==='low'){slope=-slope;width=-width;zone={...zone,floor:1/zone.ceiling,ceiling:1/zone.floor}}
+    const distance=Math.min(...[0,.5,1,1.5,2,2.5,3].map(r=>Math.abs(position-r)))*Math.abs(width);
+    found.push({mode,a:a+offset,b:b+offset,c:c+offset,turn:turn+offset,slope,width,zone,provisional,active:true,score:swing/noise-(n-1-turn)*.45-(n-1-c)*.2-distance/noise*2,anchors:[a,b,c].map((i,j)=>({point:j+1,index:i+offset,time:source[i].time,price:mode==='high'?source[i].high:source[i].low}))});
+   }
+  }
+  return found.sort((a,b)=>b.score-a.score||b.turn-a.turn)[0]||null;
+ },
  fibonacci(candles,mode='high',settings={}) {
+  if(settings.interval==='15m')return this.intradayFibonacci(candles,mode,settings);
   const frame=settings.interval||'W',daily=frame==='D',monthly=frame==='M',near=monthly?1:3,major=monthly?2:8,minBars=monthly?18:60,minGap=monthly?3:daily?20:26,maxGap=monthly?24:daily?252:208,touchLookback=monthly?6:26,touchSpread=monthly?2:daily?5:8,minTouches=monthly?2:3,retrace=daily?.08:.15,minSwing=daily?.18:monthly?.20:.30;
   if(!['high','low'].includes(mode)||candles.length<minBars)return null;
   const source=candles,rows=mode==='low'?source.map(c=>({...c,open:1/c.open,high:1/c.low,low:1/c.high,close:1/c.close})):source,n=rows.length;
@@ -84,10 +127,12 @@ function channelFit(candidate,reference,price,time){
  const levels=[0,.5,1,1.5,2,2.5,3].map(r=>channelPrice(candidate,reference,time,r)),distance=Math.min(...levels.map(value=>Math.abs(Math.log(value/price))));
  return {distance,useful:distance<=Math.log(1.25)&&Math.abs(candidate.width)*.5<=Math.log(1.8)};
 }
-const basisLabel=frame=>({AUTO:'자동',D:'일봉',W:'주봉',M:'월봉'}[frame]||frame);
+const anchorTime=time=>typeof time==='number'?formatDate(new Date(time*1000).toISOString()):time;
+const basisLabel=frame=>({AUTO:'자동',D:'일봉',W:'주봉',M:'월봉','15m':'15분 단타'}[frame]||frame);
 function completedReference(data,frame){
  const today=new Date().toISOString().slice(0,10),month=today.slice(0,7);
- const candles=data.candles.filter(c=>frame==='M'?String(c.time).slice(0,7)<month:frame==='D'?String(c.time)<today:true);
+ const asOf=Math.min(Date.now(),Date.parse(data.updated)||Date.now());
+ const candles=data.candles.filter(c=>frame==='15m'?c.time*1000+900000<=asOf:frame==='M'?String(c.time).slice(0,7)<month:frame==='D'?String(c.time)<today:true);
  return {...data,candles,interval:frame};
 }
 class FibonacciBands {
@@ -101,19 +146,19 @@ window.HongChart=class {
  destroy(){if(this.chart)this.chart.remove();this.chart=null;this.series=[];this.cloud=null;this.fibCloud=null;this.fibMarkers=null;this.fibCandidate=null;this.candles=null;this.volume=null;}
  async load(item){this.item=item;this.data=null;const token=++this.token;this.destroy();this.element.innerHTML='<div class="chart-unavailable">실제 가격 데이터를 불러오는 중…</div>';this.renderControls();try{
  const wantsFib=this.options.fib!=='off',interval=this.interval;
- const getReference=async frame=>{const key=item.tv+':'+frame;if(this.referenceCache.has(key))return this.referenceCache.get(key);const d=completedReference(await api((frame==='W'?'/api/fib-history?symbol=':'/api/history?symbol=')+encodeURIComponent(item.tv)+(frame==='W'?'':'&interval='+frame)),frame);this.referenceCache.set(key,d);return d};
+ const getReference=async frame=>{const key=item.tv+':'+frame;if(frame!=='15m'&&this.referenceCache.has(key))return this.referenceCache.get(key);const d=completedReference(frame==='15m'&&viewing.interval==='15m'?viewing:await api((frame==='W'?'/api/fib-history?symbol=':'/api/history?symbol=')+encodeURIComponent(item.tv)+(frame==='W'?'':'&interval='+frame)),frame);if(frame!=='15m')this.referenceCache.set(key,d);return d};
  const viewing=await api('/api/history?symbol='+encodeURIComponent(item.tv)+'&interval='+interval);if(token!==this.token)return;
  let selected=null,selectedFrame=null,candidate=null,reason='';
- const selectionKey=item.tv+':'+this.options.fib+':'+this.options.fibFrame;
- if(wantsFib&&this.channelSelection?.key===selectionKey){({reference:selected,frame:selectedFrame,candidate,reason}=this.channelSelection)}
+ const scalp=this.options.fibFrame==='15m',selectionKey=item.tv+':'+this.options.fib+':'+this.options.fibFrame;
+ if(wantsFib&&!scalp&&this.channelSelection?.key===selectionKey){({reference:selected,frame:selectedFrame,candidate,reason}=this.channelSelection)}
  else if(wantsFib){
   const frames=this.options.fibFrame==='AUTO'?['W','D']: [this.options.fibFrame],price=viewing.candles.at(-1).close,time=viewing.candles.at(-1).time;
-  for(const frame of frames){try{const reference=await getReference(frame),found=HongIndicators.fibonacci(reference.candles,this.options.fib,{interval:frame,currentPrice:price});
+  for(const frame of frames){try{const reference=await getReference(frame),found=HongIndicators.fibonacci(reference.candles,this.options.fib,{interval:frame,currentPrice:frame==='15m'&&interval!=='15m'?reference.candles.at(-1)?.close:price});
    if(this.options.fibFrame==='AUTO'&&frame==='W'&&!channelFit(found,reference.candles,price,time).useful){reason=found?'주봉 채널이 현재가에서 멀어 일봉으로 전환':'주봉 후보가 없어 일봉으로 전환';continue}
    selected=reference;selectedFrame=frame;candidate=found;break;
   }catch(error){reason=basisLabel(frame)+' 데이터 없음';if(this.options.fibFrame!=='AUTO')break}}
  }
- if(token!==this.token)return;if(wantsFib)this.channelSelection={key:selectionKey,reference:selected,frame:selectedFrame,candidate,reason};this.data=interval==='W'&&selectedFrame==='W'?selected:viewing;this.referenceData=selected;this.fibBasis=selectedFrame;this.selectedCandidate=candidate;this.fibReason=reason;this.draw();this.renderControls();
+ if(token!==this.token)return;if(wantsFib&&!scalp)this.channelSelection={key:selectionKey,reference:selected,frame:selectedFrame,candidate,reason};this.data=interval==='W'&&selectedFrame==='W'?selected:viewing;this.referenceData=selected;this.fibBasis=selectedFrame;this.selectedCandidate=candidate;this.fibReason=reason;this.draw();this.renderControls();
 
  }catch(e){if(token!==this.token)return;this.element.innerHTML='<div class="chart-unavailable"><b>차트 데이터 없음</b><p>'+escapeHtml(e.message)+'</p></div>';this.renderControls()}}
 
@@ -139,7 +184,7 @@ window.HongChart=class {
     this.fibMarkers=L.createSeriesMarkers(this.candles,markers);
 
     this.fibCloud=new FibonacciBands(extended,candidate,priceAt);this.candles.attachPrimitive(this.fibCloud);
-    this.fibStatus=(this.fibReason?this.fibReason+' · ':'')+(this.options.fib==='high'?'고–고–고':'저–저–저')+' · 오른쪽 연장 · ① '+candidate.anchors[0].time+' · ② '+candidate.anchors[1].time+' · 변곡 '+this.referenceData.candles[candidate.turn].time+' · ③ '+candidate.anchors[2].time;
+    this.fibStatus=(this.fibReason?this.fibReason+' · ':'')+(this.options.fib==='high'?'고–고–고':'저–저–저')+' · 오른쪽 연장 · ① '+anchorTime(candidate.anchors[0].time)+' · ② '+anchorTime(candidate.anchors[1].time)+' · 변곡 '+anchorTime(this.referenceData.candles[candidate.turn].time)+' · ③ '+anchorTime(candidate.anchors[2].time)+(candidate.active?' · 수집 기준 진행 구간'+(candidate.provisional?' · ③ 잠정':' · ③ 반전 확인'):'');
    }else this.fibStatus=(this.fibReason?this.fibReason+' · ':'')+basisLabel(this.fibBasis||this.options.fibFrame)+' 기준에서 조건을 충족하는 후보가 없습니다.';
   }
   if(this.options.rsi){const rsi=HongIndicators.rsi(this.data.candles),series=add(rsi,'#b58eff',1,{priceScaleId:'right',priceFormat:{type:'price',precision:1,minMove:.1},lastValueVisible:true});series.priceScale().applyOptions({mode:L.PriceScaleMode.Normal,autoScale:true,scaleMargins:{top:.12,bottom:.12}});series.applyOptions({autoscaleInfoProvider:(base)=>{const range=base()?.priceRange;return {priceRange:{minValue:Math.min(20,range?.minValue??20),maxValue:Math.max(80,range?.maxValue??80)}}}});for(const value of [30,70])series.createPriceLine({price:value,color:'#71899c',lineWidth:1,lineStyle:2,axisLabelVisible:true,title:''});const panes=this.chart.panes();panes[0].setStretchFactor(4);panes[1].setStretchFactor(1.5)}
@@ -147,19 +192,21 @@ window.HongChart=class {
  }
  renderControls(){
   if(!this.item)return;const saved=state.watch.some(x=>x.tv===this.item.tv),fibLabel=this.options.fib==='high'?'고–고–고':this.options.fib==='low'?'저–저–저':'OFF';
-  this.controls.innerHTML='<div class="indicator-buttons"><button data-tool="ma" class="'+(this.options.ma.size?'on':'')+'">이동평균선 '+[...this.options.ma].sort((a,b)=>a-b).join('/')+'</button><button data-tool="rsi" class="'+(this.options.rsi?'on':'')+'">RSI(14) '+(this.options.rsi?'ON':'OFF')+'</button><button data-tool="ichi" class="'+(this.options.ichi?'on':'')+'">일목균형표 '+(this.options.ichi?'ON':'OFF')+'</button><button data-tool="fib" class="'+(this.options.fib!=='off'?'on':'')+'">자동 빗각 '+fibLabel+(this.options.fib!=='off'?' · '+basisLabel(this.fibBasis||this.options.fibFrame):'')+'</button><button data-watch="'+escapeHtml(this.item.tv)+'" class="'+(saved?'on':'')+'">'+(saved?'★ 저장됨':'☆ 관심 저장')+'</button></div><div class="filters timeframe">'+['1m','5m','15m','D','W','M'].map((v,i)=>'<button data-interval="'+v+'" class="'+(v===this.interval?'sel':'')+'">'+['1분','5분','15분','일봉','주봉','월봉'][i]+'</button>').join('')+'</div><small class="data-source">'+(this.data?escapeHtml(this.data.source)+' · 마지막 봉 '+this.data.lastBar+' · 수집 '+formatDate(this.data.updated)+(this.data.stale?' · 이전 데이터':''):'가격 데이터')+(this.data&&[...this.options.ma].some(p=>p>this.data.candles.length)?'<br>선택한 MA 중 봉 수가 부족한 기간은 데이터가 없습니다.':'')+(this.fibStatus?'<br><span class="fib-status">'+basisLabel(this.fibBasis||this.options.fibFrame)+' 기준 · 봉 전환 시 유지: '+escapeHtml(this.fibStatus)+'</span>':'')+'<br>일목: 9 / 26 / 52 / 26 · 구름 불투명도 30% · <a href="https://www.tradingview.com/" target="_blank" rel="noopener noreferrer">Chart by TradingView Lightweight Charts</a></small>';
-  this.controls.querySelectorAll('[data-tool]').forEach(button=>button.onclick=()=>{const key=button.dataset.tool;if(key==='ma')this.maMenu();else if(key==='fib')this.fibMenu();else{this.options[key==='ichi'?'ichi':'rsi']=!this.options[key==='ichi'?'ichi':'rsi'];this.applyIndicators()}});
+  this.controls.innerHTML='<div class="indicator-buttons"><button data-tool="ma" class="'+(this.options.ma.size?'on':'')+'">이동평균선 '+[...this.options.ma].sort((a,b)=>a-b).join('/')+'</button><button data-tool="rsi" class="'+(this.options.rsi?'on':'')+'">RSI(14) '+(this.options.rsi?'ON':'OFF')+'</button><button data-tool="ichi" class="'+(this.options.ichi?'on':'')+'">일목균형표 '+(this.options.ichi?'ON':'OFF')+'</button><button data-tool="fib" class="'+(this.options.fib!=='off'?'on':'')+'">자동 빗각 '+fibLabel+(this.options.fib!=='off'?' · '+basisLabel(this.fibBasis||this.options.fibFrame):'')+'</button><button data-tool="scalp" class="'+(this.options.fibFrame==='15m'&&this.options.fib!=='off'?'on':'')+'">15분 단타 빗각'+(this.options.fibFrame==='15m'&&this.options.fib!=='off'?' ON':' OFF')+'</button><button data-watch="'+escapeHtml(this.item.tv)+'" class="'+(saved?'on':'')+'">'+(saved?'★ 저장됨':'☆ 관심 저장')+'</button></div><div class="filters timeframe">'+['1m','5m','15m','D','W','M'].map((v,i)=>'<button data-interval="'+v+'" class="'+(v===this.interval?'sel':'')+'">'+['1분','5분','15분','일봉','주봉','월봉'][i]+'</button>').join('')+'</div><small class="data-source">'+(this.data?escapeHtml(this.data.source)+' · 마지막 봉 '+this.data.lastBar+' · 수집 '+formatDate(this.data.updated)+(this.data.stale?' · 이전 데이터':''):'가격 데이터')+(this.data&&[...this.options.ma].some(p=>p>this.data.candles.length)?'<br>선택한 MA 중 봉 수가 부족한 기간은 데이터가 없습니다.':'')+(this.fibStatus?'<br><span class="fib-status">'+basisLabel(this.fibBasis||this.options.fibFrame)+' 기준 · 봉 전환 시 유지: '+escapeHtml(this.fibStatus)+'</span>':'')+'<br>일목: 9 / 26 / 52 / 26 · 구름 불투명도 30% · <a href="https://www.tradingview.com/" target="_blank" rel="noopener noreferrer">Chart by TradingView Lightweight Charts</a></small>';
+  this.controls.querySelectorAll('[data-tool]').forEach(button=>button.onclick=()=>{const key=button.dataset.tool;if(key==='ma')this.maMenu();else if(key==='fib')this.fibMenu();else if(key==='scalp')this.fibMenu('15m');else{this.options[key==='ichi'?'ichi':'rsi']=!this.options[key==='ichi'?'ichi':'rsi'];this.applyIndicators()}});
   this.controls.querySelectorAll('[data-interval]').forEach(button=>button.onclick=()=>{this.interval=button.dataset.interval;this.data=null;this.load(this.item)})
  }
  maMenu(){const back=document.createElement('div');back.className='modal-back';back.innerHTML='<section class="modal" role="dialog" aria-modal="true" aria-label="이동평균선 선택"><div class="modal-head"><h2>이동평균선</h2><button aria-label="닫기">×</button></div><div class="check-list">'+[20,60,120,200].map(p=>'<label><input type="checkbox" value="'+p+'" '+(this.options.ma.has(p)?'checked':'')+'> MA '+p+'</label>').join('')+'</div><small class="data-source">현재 차트 봉의 종가로 계산합니다.</small></section>';const close=()=>back.remove();back.onclick=e=>{if(e.target===back)close()};back.querySelector('button').onclick=close;back.querySelectorAll('input').forEach(input=>input.onchange=()=>{input.checked?this.options.ma.add(+input.value):this.options.ma.delete(+input.value);this.applyIndicators()});back.onkeydown=e=>{if(e.key==='Escape')close()};document.body.append(back);back.querySelector('input').focus()}
- fibMenu(){
+ fibMenu(defaultFrame=null){
+ const chosen=defaultFrame||this.options.fibFrame;
  const back=document.createElement('div');back.className='modal-back';
- back.innerHTML='<section class="modal" role="dialog" aria-modal="true" aria-label="자동 빗각 선택"><div class="modal-head"><div><h2>자동 빗각</h2><p>작도 기준 봉과 화면에 보는 봉을 따로 선택합니다.</p></div><button aria-label="닫기">×</button></div><label class="fib-basis-label" style="display:grid;gap:8px;margin-top:16px;font-size:12px">작도 기준 <select aria-label="작도 기준 봉" style="width:100%;padding:12px;background:#07131f;color:#edf5fb;border:1px solid #244258;border-radius:10px">'+['AUTO','W','D','M'].map(frame=>'<option value="'+frame+'" '+(frame===this.options.fibFrame?'selected':'')+'>'+basisLabel(frame)+(frame==='AUTO'?' · 주봉 → 일봉':'')+'</option>').join('')+'</select></label><div class="fib-mode-list"><button data-fib="high"><b>고–고–고</b><span>저항 고점 → 변곡 직전 마지막 고점 → 변곡 이후 고점</span></button><button data-fib="low"><b>저–저–저</b><span>지지 저점 → 변곡 직전 마지막 저점 → 변곡 이후 저점</span></button><button data-fib="off"><b>끄기</b><span>자동 채널을 숨깁니다.</span></button></div><small class="data-source">자동은 주봉을 먼저 확인하고, 채널이 현재가에서 멀거나 후보가 없으면 일봉으로 전환합니다. 주봉의 기존 작도 조건과 ① → ② → 변곡 → ③ 순서는 유지합니다. 일봉은 짧은 구간의 고점·저점을 확인합니다. 월봉은 최근 2년 자료를 사용하므로 후보가 부족할 수 있습니다. 선택 후 화면 봉을 바꿔도 기준점은 유지됩니다.</small></section>';
+ back.innerHTML='<section class="modal" role="dialog" aria-modal="true" aria-label="자동 빗각 선택"><div class="modal-head"><div><h2>자동 빗각</h2><p>작도 기준 봉과 화면에 보는 봉을 따로 선택합니다.</p></div><button aria-label="닫기">×</button></div><label class="fib-basis-label" style="display:grid;gap:8px;margin-top:16px;font-size:12px">작도 기준 <select aria-label="작도 기준 봉" style="width:100%;padding:12px;background:#07131f;color:#edf5fb;border:1px solid #244258;border-radius:10px">'+['AUTO','W','D','M','15m'].map(frame=>'<option value="'+frame+'" '+(frame===chosen?'selected':'')+'>'+basisLabel(frame)+(frame==='AUTO'?' · 주봉 → 일봉':'')+'</option>').join('')+'</select></label><div class="fib-mode-list"><button data-fib="high"><b>고–고–고</b><span>저항 고점 → 변곡 직전 마지막 고점 → 변곡 이후 고점</span></button><button data-fib="low"><b>저–저–저</b><span>지지 저점 → 변곡 직전 마지막 저점 → 변곡 이후 저점</span></button><button data-fib="off"><b>끄기</b><span>자동 채널을 숨깁니다.</span></button></div><small class="data-source">자동은 주봉을 먼저 확인하고, 채널이 현재가에서 멀거나 후보가 없으면 일봉으로 전환합니다. 주봉의 기존 작도 조건과 ① → ② → 변곡 → ③ 순서는 유지합니다. 일봉은 짧은 구간의 고점·저점을 확인합니다. 월봉은 최근 2년 자료를 사용하므로 후보가 부족할 수 있습니다. 15분 단타는 최근 완료된 240봉 안에서 현재 구간을 우선 탐색하며, 아직 반전이 확인되지 않은 ③은 잠정 표시합니다. 새 15분봉 수집 시 재탐색합니다. 선택 후 화면 봉을 바꿔도 작도 기준은 유지됩니다.</small></section>';
  const close=()=>back.remove();back.onclick=e=>{if(e.target===back)close()};back.querySelector('.modal-head>button').onclick=close;
- back.querySelectorAll('[data-fib]').forEach(button=>button.onclick=()=>{const mode=button.dataset.fib,frame=back.querySelector('select').value;this.options.fib=mode;this.options.fibFrame=frame;this.channelSelection=null;close();this.load(this.item)});
+ back.querySelectorAll('[data-fib]').forEach(button=>button.onclick=()=>{const mode=button.dataset.fib,frame=back.querySelector('select').value;this.options.fib=mode;this.options.fibFrame=frame;this.channelSelection=null;if(frame==='15m'&&mode!=='off')this.interval='15m';this.lastScalpRefreshBucket=Math.floor(Date.now()/900000);close();this.load(this.item)});
  back.onkeydown=e=>{if(e.key==='Escape')close()};document.body.append(back);back.querySelector('select').focus();
  }
 
+ async refreshScalp(){const range=this.chart?.timeScale().getVisibleLogicalRange();await this.load(this.item);if(range&&this.chart)this.chart.timeScale().setVisibleLogicalRange(range)}
  resize(){if(this.chart)this.chart.resize(this.element.clientWidth,this.element.clientHeight)}
 };
 

@@ -47,12 +47,14 @@ def history():
     except Exception:return fail('일봉 제공원 연결 오류 · 차트 데이터 없음','NAVER Finance / Yahoo Finance')
 @app.get('/api/intraday')
 def intraday():
+    interval=request.args.get('interval','1m')
+    if interval not in ('1m','15m'):return jsonify(error='지원하지 않는 분봉'),400
     try:symbol=providers.resolve(request.args.get('symbol','')[:40])
     except ValueError as e:return jsonify(error=str(e)),400
-    try:return jsonify(intraday_provider.intraday_history(symbol))
+    try:return jsonify(intraday_provider.intraday_history(symbol,interval))
     except Exception:
         try:
-            name='data-intraday-'+symbol.replace(':','-')+'.json'
+            name=('data-intraday15-' if interval=='15m' else 'data-intraday-')+symbol.replace(':','-')+'.json'
             response=providers.SESSION.get('https://jho971031-cloud.github.io/Hongpick/'+name,timeout=12);response.raise_for_status();data=response.json()
             if not data.get('candles'):raise ValueError('분봉 없음')
             return jsonify(data)

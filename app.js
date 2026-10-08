@@ -13,7 +13,7 @@ async function api(path){
  return HongData.api(path);
 }
 let chartScripts;
-function ensureCharts(){if(!chartScripts)chartScripts=(async()=>{for(const name of ['fib-client.js?v=6.0','lightweight-charts.js','charts.js?v=6.0'])await new Promise((resolve,reject)=>{const script=document.createElement('script');script.src=HongData.asset(name);script.onload=resolve;script.onerror=()=>{script.remove();reject(Error('차트 모듈을 불러오지 못했습니다.'))};document.head.append(script)})})().catch(error=>{chartScripts=null;throw error});return chartScripts}
+function ensureCharts(){if(!chartScripts)chartScripts=(async()=>{for(const name of ['fib-client.js?v=6.1','lightweight-charts.js','charts.js?v=6.1'])await new Promise((resolve,reject)=>{const script=document.createElement('script');script.src=HongData.asset(name);script.onload=resolve;script.onerror=()=>{script.remove();reject(Error('차트 모듈을 불러오지 못했습니다.'))};document.head.append(script)})})().catch(error=>{chartScripts=null;throw error});return chartScripts}
 function notice(root,text){root.innerHTML='<div class="empty">'+escapeHtml(text)+'</div>'}
 function source(d){return `${d.source||''} · 기준시각 ${formatDate(d.updated)}${d.stale?' · 이전 데이터':''}`}
 const pages=['menu','hongpicks','home','search','coins','gurus','turnover','fng','trump','watchlist'];
@@ -136,3 +136,5 @@ document.addEventListener('click',e=>{const button=e.target.closest('[data-pick-
 
 document.querySelector('.brand').addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();show('home')}});
 
+
+setInterval(()=>{if(document.hidden||document.querySelector('.modal-back'))return;const bucket=Math.floor(Date.now()/900000);for(const c of Object.values(charts)){if(c.options.fibFrame==='15m'&&c.options.fib!=='off'&&c.element.closest('.page.active')&&c.lastScalpRefreshBucket!==bucket){c.lastScalpRefreshBucket=bucket;c.refreshScalp()}}},60000);

@@ -10,7 +10,7 @@ def build(output,refresh=False,cache_dir=None):
     output=Path(output);base_build(output,refresh,cache_dir)
     shutil.copy2(Path(__file__).resolve().parent/'fib-client.js',output/'fib-client.js')
     path=output/'data-manifest.json';manifest=json.loads(path.read_text(encoding='utf-8'))
-    manifest['version']='6.0';manifest['fibHistories']={};symbols=sorted(manifest.get('histories',{}))
+    manifest['version']='6.1';manifest['fibHistories']={};symbols=sorted(manifest.get('histories',{}))
     if refresh:
         with ThreadPoolExecutor(max_workers=3) as pool:
             jobs={pool.submit(p.fibonacci_history,tv):tv for tv in symbols}
@@ -21,17 +21,18 @@ def build(output,refresh=False,cache_dir=None):
                     (output/name).write_text(json.dumps(data,ensure_ascii=False,separators=(',',':')),encoding='utf-8')
                     manifest['fibHistories'][tv]={'file':name,'updated':data.get('updated'),'lastBar':data.get('lastBar')}
                 except Exception:manifest.setdefault('failures',[]).append('fib-history:'+tv)
-    manifest['intradayHistories']={}
-    if refresh:
-        with ThreadPoolExecutor(max_workers=4) as pool:
-            jobs={pool.submit(intraday_provider.intraday_history,tv):tv for tv in symbols}
-            for job in as_completed(jobs):
-                tv=jobs[job]
-                try:
-                    data=job.result();name='data-intraday-'+tv.replace(':','-')+'.json'
-                    (output/name).write_text(json.dumps(data,ensure_ascii=False,separators=(',',':')),encoding='utf-8')
-                    manifest['intradayHistories'][tv]={'file':name,'updated':data['updated'],'lastBar':data['lastBar']}
-                except Exception:manifest.setdefault('failures',[]).append('intraday:'+tv)
+    for interval,key,prefix in [('1m','intradayHistories','data-intraday-'),('15m','intraday15Histories','data-intraday15-')]:
+        manifest[key]={}
+        if refresh:
+            with ThreadPoolExecutor(max_workers=4) as pool:
+                jobs={pool.submit(intraday_provider.intraday_history,tv,interval):tv for tv in symbols}
+                for job in as_completed(jobs):
+                    tv=jobs[job]
+                    try:
+                        data=job.result();name=prefix+tv.replace(':','-')+'.json'
+                        (output/name).write_text(json.dumps(data,ensure_ascii=False,separators=(',',':')),encoding='utf-8')
+                        manifest[key][tv]={'file':name,'updated':data['updated'],'lastBar':data['lastBar']}
+                    except Exception:manifest.setdefault('failures',[]).append(interval+':'+tv)
     path.write_text(json.dumps(manifest,ensure_ascii=False,separators=(',',':')),encoding='utf-8')
     try:
         subprocess.run(['node',str(Path(__file__).resolve().parent/'rank_hongpicks.js'),str(output)],check=True,timeout=120)
