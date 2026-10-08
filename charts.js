@@ -227,9 +227,9 @@ window.HongChart=class {
   const root=document.createElement('section');root.className='chart-screen chart-screen-landscape';root.setAttribute('role','dialog');root.setAttribute('aria-modal','true');root.setAttribute('aria-label','차트 전체화면');
   root.innerHTML='<div class="chart-screen-toolbar"><b>'+escapeHtml(this.item.name||this.item.tv)+' <small>'+escapeHtml(this.interval)+'</small></b><div><button data-screen-landscape aria-pressed="true">가로보기 ON</button><button data-screen-settings aria-expanded="false">설정</button><button data-screen-close aria-label="전체화면 닫기">닫기 ×</button></div></div><div class="chart-screen-chart"></div><div class="chart-screen-controls" hidden></div>';
   const chartSlot=document.createComment('chart'),controlSlot=document.createComment('controls');this.element.before(chartSlot);this.controls.before(controlSlot);
-  const state={root,chartSlot,controlSlot,scroll:window.scrollY,overflow:document.body.style.overflow,native:false,locked:false,focus:document.activeElement};this.fullscreenState=state;
-  root.querySelector('.chart-screen-chart').append(this.element);root.querySelector('.chart-screen-controls').append(this.controls);document.body.append(root);document.body.style.overflow='hidden';
-  const resize=()=>{requestAnimationFrame(()=>this.resize())};
+  const state={root,chartSlot,controlSlot,scroll:window.scrollY,overflow:document.body.style.overflow,htmlOverflow:document.documentElement.style.overflow,range:this.chart?.timeScale().getVisibleLogicalRange(),opening:true,native:false,locked:false,focus:document.activeElement};this.fullscreenState=state;
+  root.querySelector('.chart-screen-chart').append(this.element);root.querySelector('.chart-screen-controls').append(this.controls);document.body.append(root);document.body.style.overflow='hidden';document.documentElement.style.overflow='hidden';
+  const resize=()=>{const range=state.opening?state.range:this.chart?.timeScale().getVisibleLogicalRange();requestAnimationFrame(()=>{this.resize();requestAnimationFrame(()=>{if(range&&this.fullscreenState===state&&this.chart)this.chart.timeScale().setVisibleLogicalRange(range);state.opening=false})})};
   state.resize=resize;window.addEventListener('resize',resize);window.addEventListener('orientationchange',resize);state.key=e=>{if(e.key==='Escape'){e.preventDefault();this.closeFullscreen()}};document.addEventListener('keydown',state.key);
   state.change=()=>{if(state.native&&document.fullscreenElement!==root)this.closeFullscreen();else resize()};document.addEventListener('fullscreenchange',state.change);
   root.querySelector('[data-screen-close]').onclick=()=>this.closeFullscreen();root.querySelector('[data-screen-settings]').onclick=e=>{const controls=root.querySelector('.chart-screen-controls');controls.hidden=!controls.hidden;e.currentTarget.setAttribute('aria-expanded',String(!controls.hidden));resize()};
@@ -238,11 +238,11 @@ window.HongChart=class {
   if(root.requestFullscreen&&!document.fullscreenElement){try{const entered=root.requestFullscreen();Promise.resolve(entered).then(async()=>{if(this.fullscreenState!==state){if(document.fullscreenElement===root)await document.exitFullscreen();return}state.native=true;try{await screen.orientation?.lock?.('landscape');state.locked=!!screen.orientation?.lock;if(this.fullscreenState!==state&&state.locked)screen.orientation?.unlock?.()}catch{}resize()}).catch(()=>resize())}catch{resize()}}
  }
  closeFullscreen(){
-  const state=this.fullscreenState;if(!state)return;this.fullscreenState=null;
+  const state=this.fullscreenState;if(!state)return;this.fullscreenState=null;const range=this.chart?.timeScale().getVisibleLogicalRange();
   document.removeEventListener('fullscreenchange',state.change);document.removeEventListener('keydown',state.key);window.removeEventListener('resize',state.resize);window.removeEventListener('orientationchange',state.resize);
   if(state.locked)try{screen.orientation?.unlock?.()}catch{}
   if(document.fullscreenElement===state.root)try{document.exitFullscreen()?.catch(()=>{})}catch{}
-  state.chartSlot.replaceWith(this.element);state.controlSlot.replaceWith(this.controls);state.root.remove();document.body.style.overflow=state.overflow;window.scrollTo(0,state.scroll);this.controls.querySelector('[data-tool="fullscreen"]')?.focus({preventScroll:true});requestAnimationFrame(()=>this.resize());
+  state.chartSlot.replaceWith(this.element);state.controlSlot.replaceWith(this.controls);state.root.remove();document.body.style.overflow=state.overflow;document.documentElement.style.overflow=state.htmlOverflow;window.scrollTo(0,state.scroll);this.controls.querySelector('[data-tool="fullscreen"]')?.focus({preventScroll:true});requestAnimationFrame(()=>{this.resize();requestAnimationFrame(()=>{if(range&&this.chart)this.chart.timeScale().setVisibleLogicalRange(range)})});
  }
 
  async refreshScalp(){const range=this.chart?.timeScale().getVisibleLogicalRange();await this.load(this.item);if(range&&this.chart)this.chart.timeScale().setVisibleLogicalRange(range)}
