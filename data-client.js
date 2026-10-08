@@ -39,7 +39,7 @@ window.HongData=(()=>{
   found.sort((a,b)=>a.score-b.score||a.x.ticker.length-b.x.ticker.length||a.x.ticker.localeCompare(b.x.ticker));return {results:found.slice(0,30).map(v=>v.x),source:d.source};
  }
  async function binanceBars(tv,frame='D'){
-  const symbol=tv.split(':').at(-1),interval={D:'1d',W:'1w','1m':'1m','15m':'15m'}[frame];if(!/^[A-Z0-9]{1,30}USDT$/.test(symbol)||!interval)throw Error('지원하지 않는 바이낸스 심볼');
+  const symbol=tv.split(':').at(-1),interval={D:'1d',W:'1w','1m':'1m','5m':'5m','15m':'15m'}[frame];if(!/^[A-Z0-9]{1,30}USDT$/.test(symbol)||!interval)throw Error('지원하지 않는 바이낸스 심볼');
   const raw=await json(new URL('https://data-api.binance.vision/api/v3/klines?symbol='+symbol+'&interval='+interval+'&limit=1000'),frame.endsWith('m')?120000:900000);
   const candles=raw.filter(x=>frame!=='W'||x[6]<Date.now()).map(x=>({time:frame.endsWith('m')?Math.floor(x[0]/1000):new Date(x[0]).toISOString().slice(0,10),open:Number(x[1]),high:Number(x[2]),low:Number(x[3]),close:Number(x[4]),volume:Number(x[5])})).filter(x=>[x.open,x.high,x.low,x.close,x.volume].every(Number.isFinite)&&x.low>0);
   if(candles.length<2)throw Error('바이낸스 캔들 데이터 부족');return {candles,interval:frame,source:'Binance Spot '+interval+' OHLCV',updated:new Date().toISOString(),lastBar:candles.at(-1).time,completeWeeksOnly:frame==='W',exchangeTimezone:'UTC'};

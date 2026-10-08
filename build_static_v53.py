@@ -10,7 +10,7 @@ def build(output,refresh=False,cache_dir=None):
     output=Path(output);base_build(output,refresh,cache_dir)
     shutil.copy2(Path(__file__).resolve().parent/'fib-client.js',output/'fib-client.js')
     path=output/'data-manifest.json';manifest=json.loads(path.read_text(encoding='utf-8'))
-    manifest['version']='6.1';manifest['fibHistories']={};symbols=sorted(manifest.get('histories',{}))
+    manifest['version']='6.2';manifest['fibHistories']={};symbols=sorted(manifest.get('histories',{}))
     if refresh:
         with ThreadPoolExecutor(max_workers=3) as pool:
             jobs={pool.submit(p.fibonacci_history,tv):tv for tv in symbols}
@@ -21,7 +21,7 @@ def build(output,refresh=False,cache_dir=None):
                     (output/name).write_text(json.dumps(data,ensure_ascii=False,separators=(',',':')),encoding='utf-8')
                     manifest['fibHistories'][tv]={'file':name,'updated':data.get('updated'),'lastBar':data.get('lastBar')}
                 except Exception:manifest.setdefault('failures',[]).append('fib-history:'+tv)
-    for interval,key,prefix in [('1m','intradayHistories','data-intraday-'),('15m','intraday15Histories','data-intraday15-')]:
+    for interval,key,prefix in [('1m','intradayHistories','data-intraday-'),('5m','intraday5Histories','data-intraday5-'),('15m','intraday15Histories','data-intraday15-')]:
         manifest[key]={}
         if refresh:
             with ThreadPoolExecutor(max_workers=4) as pool:
