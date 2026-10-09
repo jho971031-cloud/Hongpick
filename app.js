@@ -8,7 +8,7 @@ function readFngKind(){try{return localStorage.getItem('hongpick.fng.kind')==='c
 const state={market:'us',rank:50,filters:new Set(),rows:[],watch:readWatch(),search:null,current:null,gurus:null,guruIndex:0,guruFilter:'all',trump:null,trumpFilter:'all',trumpQuery:'',fngKind:readFngKind(),loaded:new Set(),page:'home'};
 const charts={};
 let coinData=null,coinSelected=null,coinPending=null,coinSearchToken=0,watchMarket='stock';
-let picksPending=null,picksData=null,picksMarket='all';
+let picksPending=null,picksData=null,picksMarket='all',picksOversold=false;
 async function api(path){
  return HongData.api(path);
 }
@@ -115,15 +115,16 @@ async function loadPicks(){
  if(picksPending)return picksPending;
  picksPending=(async()=>{try{picksData=await api('/api/hongpicks');renderPicks()}catch(error){for(const id of ['picksList','homePicks'])notice($(id),error.message);for(const id of ['picksSource','homePicksSource'])$(id).textContent='추천 데이터 없음 · 다른 메뉴는 계속 사용할 수 있습니다.'}finally{picksPending=null}})();return picksPending;
 }
+function isDailyOversold(x){return Number.isFinite(x.rsi)&&x.rsi<=30}
 function pickRow(x,index,compact=false){
  const stars='★'.repeat(x.stars)+'☆'.repeat(5-x.stars),week=x.weekly;
- const badges=[`<span class="${x.rsi<=30?'met':''}">일봉 RSI ${number(x.rsi,1)}</span>`,`<span class="${week&&week.distance<=5?'met':''}">${week?'주봉 빗각 '+number(week.distance,1)+'%':'주봉 채널 없음'}</span>`,`<span class="${x.golden?.matched?'met':''}">${x.golden?.matched?'골든크로스 '+x.golden.date:x.golden?'골든크로스 없음':'MA 데이터 없음'}</span>`,`<span class="${x.rally>=10?'met':''}">본장 ${percent(x.rally)}</span>`];
+ const badges=[`<span class="${isDailyOversold(x)?'met':''}">일봉 RSI ${number(x.rsi,1)}${isDailyOversold(x)?' · 과매도':''}</span>`,`<span class="${week&&week.distance<=5?'met':''}">${week?'주봉 빗각 '+number(week.distance,1)+'%':'주봉 채널 없음'}</span>`,`<span class="${x.golden?.matched?'met':''}">${x.golden?.matched?'골든크로스 '+x.golden.date:x.golden?'골든크로스 없음':'MA 데이터 없음'}</span>`,`<span class="${x.rally>=10?'met':''}">본장 ${percent(x.rally)}</span>`];
  return `<button class="pick-row ${compact?'compact':''}" data-pick-tv="${escapeHtml(x.tv)}"><span class="pick-rank">${index+1}</span><span class="pick-info"><b>${escapeHtml(x.name)}</b><small>${escapeHtml(x.ticker)} · ${x.market==='kr'?'한국':'미국'} · ${number(x.price)} ${escapeHtml(x.currency||'')}</small><span class="pick-signals">${badges.join('')}</span>${compact?'':`<small>본장 기준 ${escapeHtml(x.sessionDate)}${x.stale?' · 이전 수집 데이터':''}${week?' · '+(week.mode==='high'?'고–고–고':'저–저–저')+' 레벨 '+week.ratio+' · '+number(week.line)+' '+escapeHtml(x.currency||''):''}</small>`}</span><span class="pick-rating"><span class="pick-stars" aria-label="추천 별 ${x.stars}개 / 5개">${stars}</span><small>${number(x.score)} / 100</small>${x.score===0?'<small>신호 없음</small>':''}</span></button>`;
 }
 function renderPicks(){
- if(!picksData)return;const all=picksData.rows||[],rows=all.filter(x=>picksMarket==='all'||x.market===picksMarket).slice(0,50);
- $('picksTitle').textContent=(picksMarket==='all'?'전체':picksMarket==='us'?'미국':'한국')+' 홍픽종목 TOP50';$('picksCount').textContent=`${rows.length}개 표시 · ${all.length}/${picksData.candidateCount}개 분석`;
- $('picksList').innerHTML=rows.length?rows.map((x,i)=>pickRow(x,i)).join(''):'<div class="empty">분석 가능한 실제 데이터가 없습니다.</div>';
+ if(!picksData)return;const all=picksData.rows||[],rows=all.filter(x=>(picksMarket==='all'||x.market===picksMarket)&&(!picksOversold||isDailyOversold(x))).slice(0,50);
+ $('picksTitle').textContent=(picksMarket==='all'?'전체':picksMarket==='us'?'미국':'한국')+' 홍픽종목 TOP50';$('picksCount').textContent=`${rows.length}개 표시${picksOversold?' · 일봉 RSI(14) ≤30 과매도':''} · ${all.length}/${picksData.candidateCount}개 분석`;
+ $('picksList').innerHTML=rows.length?rows.map((x,i)=>pickRow(x,i)).join(''):'<div class="empty">'+(all.length&&picksOversold?'선택한 시장에서 일봉 과매도 조건을 충족하는 종목이 없습니다.':'분석 가능한 실제 데이터가 없습니다.')+'</div>'; 
  $('homePicks').innerHTML=all.length?all.slice(0,10).map((x,i)=>pickRow(x,i,true)).join(''):'<div class="empty">분석 가능한 실제 데이터가 없습니다.</div>';
  for(const id of ['picksSource','homePicksSource'])$(id).textContent=source(picksData)+' · 일봉 종가 기준 · 약 30분마다 수집'+(picksData.failures?.length?' · '+picksData.failures.length+'개 종목 일봉 데이터 없음':'');
  document.querySelectorAll('[data-pick-tv]').forEach(b=>b.onclick=()=>openPick(all.find(x=>x.tv===b.dataset.pickTv)));
@@ -138,3 +139,5 @@ document.querySelector('.brand').addEventListener('keydown',e=>{if(e.key==='Ente
 
 
 setInterval(()=>{if(document.hidden||document.querySelector('.modal-back'))return;for(const c of Object.values(charts)){const bucket=Math.floor(Date.now()/(parseInt(c.options.fibFrame)*60000||900000));if(['5m','15m'].includes(c.options.fibFrame)&&!c.expandedTool&&c.options.fib!=='off'&&(c.fullscreenState||c.element.closest('.page.active'))&&c.lastScalpRefreshBucket!==bucket){c.lastScalpRefreshBucket=bucket;c.refreshScalp()}}},60000);
+
+$('picksOversold').onchange=e=>{picksOversold=e.target.checked;renderPicks()};
