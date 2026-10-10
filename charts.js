@@ -111,16 +111,15 @@ function channelExtension(candles,interval,count=52,continuous=false){
  for(let i=0;i<count;i++){if(minute)date=new Date(date.getTime()+parseInt(interval)*60000);else if(interval==='M'){date.setUTCDate(1);date.setUTCMonth(date.getUTCMonth()+1)}else if(interval==='W')date.setUTCDate(date.getUTCDate()+7);else{do{date.setUTCDate(date.getUTCDate()+1)}while(!continuous&&[0,6].includes(date.getUTCDay()))}result.push({time:minute?Math.floor(date.getTime()/1000):date.toISOString().slice(0,10)})}return result;
 }
 function channelPrice(candidate,weekly,time,ratio=0){return Math.exp(Math.log(candidate.anchors[0].price)+candidate.slope*(referencePosition(time,weekly)-candidate.a)+ratio*candidate.width)}
-// After the last real bar, continue the visible tangent by chart bar index.
-// The time scale spaces bars equally even across weekends and market holidays.
-function channelProjection(candidate,reference,points,actualCount){
- const lastPosition=referencePosition(points[actualCount-1].time,reference);
- const priorPosition=referencePosition(points[actualCount-2].time,reference);
- const logLast=Math.log(candidate.anchors[0].price)+candidate.slope*(lastPosition-candidate.a);
- const logStep=candidate.slope*(lastPosition-priorPosition);
- return (index,ratio=0)=>index<actualCount
-  ?channelPrice(candidate,reference,points[index].time,ratio)
-  :Math.exp(logLast+logStep*(index-actualCount+1)+ratio*candidate.width);
+// A channel is one straight line on the chart's logarithmic/bar-index axes.
+// Calendar gaps must not change the slope at the real/future boundary.
+// Include every indicator timestamp: all series share one logical time scale.
+function channelProjection(candidate,points){
+ const [a,b,c]=candidate.anchors;
+ const pa=referencePosition(a.time,points),pb=referencePosition(b.time,points),pc=referencePosition(c.time,points);
+ const origin=Math.log(a.price),slope=(Math.log(b.price)-origin)/(pb-pa);
+ const width=Math.log(c.price)-(origin+slope*(pc-pa));
+ return (index,ratio=0)=>Math.exp(origin+slope*(index-pa)+ratio*width);
 }
 function channelFit(candidate,reference,price,time){
  if(!candidate||!reference?.length||!(price>0))return {useful:false,distance:Infinity};
@@ -171,14 +170,15 @@ window.HongChart=class {
   if(this.fibMarkers){this.candles.detachPrimitive(this.fibMarkers);this.fibMarkers=null}
   this.fibCandidate=null;this.fibStatus='';
   const L=LightweightCharts,add=(data,color,pane=0,extra={})=>{const series=this.chart.addSeries(L.LineSeries,{priceFormat:this.priceFormat,color,lineWidth:1,lastValueVisible:false,priceLineVisible:false,crosshairMarkerVisible:false,...extra},pane);series.setData(data);this.series.push(series);return series};
+  const channelTimes=this.data.candles.map(c=>({time:c.time}));
   const colors={20:'#f4c95d',60:'#58adff',120:'#b58eff',200:'#f790ad'};
   for(const period of this.options.ma)add(HongIndicators.ma(this.data.candles,period),colors[period]);
-  if(this.options.ichi){const d=HongIndicators.ichimoku(this.data.candles,this.interval,this.item?.type==='crypto');add(d.conversion,'#4d9bff');add(d.base,'#ff765d');add(d.spanA,'#16d79b');add(d.spanB,'#ff526d');add(d.lag,'#bb8ae8');this.cloud=new IchimokuCloud(d.spanA,d.spanB);this.candles.attachPrimitive(this.cloud)}
+  if(this.options.ichi){const d=HongIndicators.ichimoku(this.data.candles,this.interval,this.item?.type==='crypto');channelTimes.push(...d.spanA,...d.spanB);add(d.conversion,'#4d9bff');add(d.base,'#ff765d');add(d.spanA,'#16d79b');add(d.spanB,'#ff526d');add(d.lag,'#bb8ae8');this.cloud=new IchimokuCloud(d.spanA,d.spanB);this.candles.attachPrimitive(this.cloud)}
   if(this.options.fib!=='off'){
    const candidate=this.selectedCandidate;this.fibCandidate=candidate;
    if(candidate){
-    const palette={0:'#92989f',.5:'#52bd58',1:'#ff515b',1.5:'#00a98d',2:'#ffad16',2.5:'#00bdd9',3:'#92989f'},extended=channelExtension(this.data.candles,this.interval,52,this.item?.type==='crypto');
-    const priceAt=channelProjection(candidate,this.referenceData.candles,extended,this.data.candles.length);
+    const palette={0:'#92989f',.5:'#52bd58',1:'#ff515b',1.5:'#00a98d',2:'#ffad16',2.5:'#00bdd9',3:'#92989f'},future=channelExtension(this.data.candles,this.interval,52,this.item?.type==='crypto'),extended=[...new Map([...future,...channelTimes].map(c=>[chartSeconds(c.time),{time:c.time}])).values()].sort((a,b)=>chartSeconds(a.time)-chartSeconds(b.time));
+    const priceAt=channelProjection(candidate,extended);
     for(const [ratio,color] of Object.entries(palette)){const r=Number(ratio),data=[];for(let i=0;i<extended.length;i++){const value=priceAt(i,r);if(Number.isFinite(value)&&value>0)data.push({time:extended[i].time,value})}add(data,color,0,{lineWidth:r===0||r===1?2:1,lastValueVisible:true,title:String(r),autoscaleInfoProvider:()=>null})}
     const first=chartSeconds(this.data.candles[0].time),last=chartSeconds(this.data.candles.at(-1).time),markers=candidate.anchors.filter(x=>chartSeconds(x.time)>=first&&chartSeconds(x.time)<=last).map((x,i)=>{const nearest=this.data.candles.reduce((best,row)=>Math.abs(chartSeconds(row.time)-chartSeconds(x.time))<Math.abs(chartSeconds(best.time)-chartSeconds(x.time))?row:best);return {time:nearest.time,position:this.options.fib==='high'?'aboveBar':'belowBar',color:'#edf7ff',shape:'circle',text:['①','②','③'][x.point-1]}});
     this.fibMarkers=L.createSeriesMarkers(this.candles,markers);
