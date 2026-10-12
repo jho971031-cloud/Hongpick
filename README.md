@@ -1,4 +1,4 @@
-# Hong Pick 6.4.2
+# Hong Pick 6.4.3
 
 기존 Flask + HTML/CSS/JS 프로젝트를 확장한 개인용 주식 대시보드입니다.
 
@@ -60,7 +60,7 @@ GitHub Pages의 정적 파일 경로 오류를 운영 사이트 이동으로 해
 
 `python -m unittest -v test_disclosures.py`: 정정공시 대체/추가, 동일 주식종류 합산, 알 수 없는 정정 유형 거부, 공식 보고 주체 연결 및 복수 후보 거부를 검증합니다. 실제 SEC 6개 운용사의 2026-06-30 공시와 NAVER/Yahoo/TradingView API도 확인했습니다. 13F 정정 처리 근거: https://www.sec.gov/rules-regulations/staff-guidance/frequently-asked-questions-about-form-13f
 
-## v6.4.2 운영·실시간 범위
+## v6.4.3 운영·실시간 범위
 
 - 코인 목록: Binance USDT 현물 24시간 miniTicker 스트림으로 가격·등락률·실제 체결대금 순위를 갱신합니다. 이벤트 미수신 종목은 수집본 표시와 원래 시각을 유지합니다.
 - 코인 차트: Binance 원본 REST OHLCV로 시작하고 1분/5분/15분/일/주/월봉의 진행 중인 봉을 WebSocket으로 갱신합니다. 지표는 3초 단위로 묶어 갱신하며, 채널 선택은 완료된 봉에서만 합니다. 실시간 봉과 잠정 채널 기준점은 다른 의미입니다.
@@ -72,3 +72,5 @@ GitHub Pages의 정적 파일 경로 오류를 운영 사이트 이동으로 해
 - Trump는 검증된 주요 거래 11건을 유지합니다. 1,156건 전체 원문으로 이동할 수 있으며 검증하지 않은 OCR 행을 실제 거래로 추가하지 않습니다. Pershing 보고 범위 변경 분기는 동일 포트폴리오의 매수·매도 비교가 불가능해 비교에서 제외합니다.
 
 검증: `node test_live_data.js`, `node test_data_client.js`, `node test_hongpicks.js`, `python -m unittest -v test_architecture.py test_disclosures.py`.
+
+실시간 갱신은 기존 지표 선·RSI 영역·구름을 재사용하고 확대·이동 범위를 유지합니다. 차트를 보는 동안 위쪽 거래대금 목록의 자동 재정렬을 멈추며, 목록으로 돌아가면 최신 순위를 표시합니다. 새 봉 수신 시 자동으로 화면을 밀지 않습니다.

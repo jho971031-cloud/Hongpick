@@ -93,6 +93,7 @@ window.HongIndicators = {
  }
 };
 class IchimokuCloud {
+ setData(a,b){const values=new Map(b.map(x=>[x.time,x.value]));this.points=a.filter(x=>values.has(x.time)).map(x=>({time:x.time,a:x.value,b:values.get(x.time)}));this.requestUpdate?.()}
  constructor(a,b){this.points=a.map(x=>{const y=b.find(y=>y.time===x.time);return y?{time:x.time,a:x.value,b:y.value}:null}).filter(Boolean);this.coordinates=[];this.view={zOrder:()=> 'bottom',renderer:()=>({draw:target=>target.useMediaCoordinateSpace(({context:ctx})=>{for(let i=1;i<this.coordinates.length;i++){const p=this.coordinates[i-1],q=this.coordinates[i];if(!p||!q)continue;const polygon=(left,right,color)=>{ctx.fillStyle=color;ctx.beginPath();ctx.moveTo(left.x,left.a);ctx.lineTo(right.x,right.a);ctx.lineTo(right.x,right.b);ctx.lineTo(left.x,left.b);ctx.closePath();ctx.fill()};const diff=p.a-p.b,next=q.a-q.b;if(diff*next<0){const f=diff/(diff-next);const cross={x:p.x+(q.x-p.x)*f,a:p.a+(q.a-p.a)*f,b:p.b+(q.b-p.b)*f};polygon(p,cross,diff<0?'rgba(22,215,155,0.3)':'rgba(255,82,109,0.3)');polygon(cross,q,next<0?'rgba(22,215,155,0.3)':'rgba(255,82,109,0.3)')}else polygon(p,q,next<0?'rgba(22,215,155,0.3)':'rgba(255,82,109,0.3)')}})})}; }
  attached({chart,series,requestUpdate}){this.chart=chart;this.series=series;this.requestUpdate=requestUpdate;requestUpdate()}
  updateAllViews(){this.coordinates=this.points.map(p=>{const x=this.chart.timeScale().timeToCoordinate(p.time),a=this.series.priceToCoordinate(p.a),b=this.series.priceToCoordinate(p.b);return x==null||a==null||b==null?null:{x,a,b}})}
@@ -136,13 +137,13 @@ function completedReference(data,frame){
 }
 class FibonacciBands {
  constructor(candles,candidate,priceAt){this.priceAt=priceAt;this.candles=candles;this.candidate=candidate;this.rows=[];this.colors=['rgba(82,189,88,.07)','rgba(255,81,91,.07)','rgba(0,169,141,.07)','rgba(255,173,22,.07)','rgba(0,189,217,.07)','rgba(146,152,159,.06)'];this.view={zOrder:()=> 'bottom',renderer:()=>({draw:target=>target.useMediaCoordinateSpace(({context:ctx})=>{for(let i=1;i<this.rows.length;i++){const left=this.rows[i-1],right=this.rows[i];if(!left||!right)continue;for(let band=0;band<6;band++){ctx.fillStyle=this.colors[band];ctx.beginPath();ctx.moveTo(left.x,left.y[band]);ctx.lineTo(right.x,right.y[band]);ctx.lineTo(right.x,right.y[band+1]);ctx.lineTo(left.x,left.y[band+1]);ctx.closePath();ctx.fill()}}})})}}
- attached({chart,series,requestUpdate}){this.chart=chart;this.series=series;requestUpdate()}
+ attached({chart,series,requestUpdate}){this.chart=chart;this.series=series;this.requestUpdate=requestUpdate;requestUpdate()}
  updateAllViews(){const ratios=[0,.5,1,1.5,2,2.5,3];this.rows=[];for(let i=0;i<this.candles.length;i++){const x=this.chart.timeScale().timeToCoordinate(this.candles[i].time),y=ratios.map(r=>this.series.priceToCoordinate(this.priceAt(i,r)));this.rows.push(x==null||y.some(v=>v==null)?null:{x,y})}}
  paneViews(){return[this.view]}
 }
 window.HongChart=class {
  constructor(element,controls){this.element=element;this.controls=controls;this.options={ma:new Set([20]),rsi:false,ichi:false,fib:'off',fibFrame:'AUTO'};this.interval='D';this.series=[];this.token=0;this.item=null;this.referenceCache=new Map();this.expandedTool=null;this.panelDraft=null;}
- destroy(){this.stopLive();if(this.chart)this.chart.remove();this.chart=null;this.series=[];this.cloud=null;this.fibCloud=null;this.fibMarkers=null;this.fibCandidate=null;this.candles=null;this.volume=null;}
+ destroy(){this.stopLive();if(this.chart)this.chart.remove();this.chart=null;this.series=[];this.indicatorSeries=new Map();this.cloud=null;this.fibCloud=null;this.fibMarkers=null;this.fibCandidate=null;this.candles=null;this.volume=null;}
  async load(item){this.item=item;this.lastLive=null;this.liveMode='연결 대기';this.data=null;const token=++this.token;this.destroy();this.element.innerHTML='<div class="chart-unavailable">실제 가격 데이터를 불러오는 중…</div>';this.renderControls();try{
  const wantsFib=this.options.fib!=='off',interval=this.interval;
  const getReference=async frame=>{const key=item.tv+':'+frame;if(!['5m','15m'].includes(frame)&&this.referenceCache.has(key))return this.referenceCache.get(key);const d=completedReference(['5m','15m'].includes(frame)&&viewing.interval===frame?viewing:await api((frame==='W'?'/api/fib-history?symbol=':'/api/history?symbol=')+encodeURIComponent(item.tv)+(frame==='W'?'':'&interval='+frame)),frame);if(!['5m','15m'].includes(frame))this.referenceCache.set(key,d);return d};
@@ -174,30 +175,42 @@ window.HongChart=class {
    if(chartSeconds(row.time)<chartSeconds(last.time))return;
    if(row.time===last.time)this.data.candles[this.data.candles.length-1]=row;else this.data.candles.push(row);
    this.data.updated=parsed.updated;this.data.lastBar=row.time;this.data.formingTime=parsed.closed?null:row.time;this.data.stale=false;this.lastLive=parsed.updated;this.liveMode='실시간';seen=true;
-   this.candles.update(row);this.volume.update({time:row.time,value:row.volume,color:row.close>=row.open?'#16d79b38':'#ff526d38'});
-   if(!this.liveIndicatorTimer)this.liveIndicatorTimer=setTimeout(()=>{this.liveIndicatorTimer=null;if(token===this.token&&epoch===this.liveEpoch&&this.chart)this.applyIndicators(true)},3000);
+   this.preserveViewport(()=>{this.candles.update(row);this.volume.update({time:row.time,value:row.volume,color:row.close>=row.open?'#16d79b38':'#ff526d38'})});
+   if(!this.liveIndicatorTimer)this.liveIndicatorTimer=setTimeout(()=>{this.liveIndicatorTimer=null;if(token===this.token&&epoch===this.liveEpoch&&this.chart)this.preserveViewport(()=>this.applyIndicators(true))},3000);
    this.renderLiveSource();
   };
   this.liveClient=HongLive.subscribe([symbol.toLowerCase()+'@kline_'+HongLive.frame[interval]],apply,async status=>{
    if(token!==this.token||epoch!==this.liveEpoch)return;
-   if(status.mode==='connecting'&&(seen||Date.now()-Date.parse(this.data.updated)>15000)&&!syncing){syncing=true;try{const fresh=await HongData.binanceBars(this.item.tv,interval);if(token!==this.token||epoch!==this.liveEpoch||!this.chart)return;this.data=fresh;this.candles.setData(fresh.candles);this.volume.setData(fresh.candles.map(c=>({time:c.time,value:c.volume,color:c.close>=c.open?'#16d79b38':'#ff526d38'})));this.applyIndicators(true)}catch{this.liveMode='복구 대기 · 이전 수신값'}finally{syncing=false;if(pending){const p=pending;pending=null;apply(p)}}}
+   if(status.mode==='connecting'&&(seen||Date.now()-Date.parse(this.data.updated)>15000)&&!syncing){syncing=true;try{const fresh=await HongData.binanceBars(this.item.tv,interval);if(token!==this.token||epoch!==this.liveEpoch||!this.chart)return;this.preserveViewport(()=>{this.data=fresh;this.candles.setData(fresh.candles);this.volume.setData(fresh.candles.map(c=>({time:c.time,value:c.volume,color:c.close>=c.open?'#16d79b38':'#ff526d38'})));this.applyIndicators(true)},true)}catch{this.liveMode='복구 대기 · 이전 수신값'}finally{syncing=false;if(pending){const p=pending;pending=null;apply(p)}}}
    if(status.mode!=='receiving')this.liveMode={connecting:'연결 중',reconnecting:'재연결 중 · 이전 수신값',paused:'일시정지 · 이전 수신값'}[status.mode]||'수집본';
    if(this.item?.tv.startsWith('BINANCE:'))this.renderLiveSource();
   });
  }
- draw(){const last=this.data.candles.at(-1)?.close||1,precision=this.item?.type==='crypto'?Math.min(12,Math.max(2,4-Math.floor(Math.log10(last)))):2;this.priceFormat={type:'price',precision,minMove:10**-precision};this.destroy();this.element.replaceChildren();const L=LightweightCharts;this.chart=L.createChart(this.element,{autoSize:true,layout:{background:{color:'#0b1927'},textColor:'#8194a7',attributionLogo:true,panes:{separatorColor:'#183247'}},grid:{vertLines:{color:'#132a3c'},horzLines:{color:'#132a3c'}},rightPriceScale:{borderColor:'#183247',mode:this.options.fib==='off'?L.PriceScaleMode.Normal:L.PriceScaleMode.Logarithmic},timeScale:{borderColor:'#183247',rightOffset:4,timeVisible:this.interval.endsWith('m'),secondsVisible:false},localization:{locale:'ko-KR'},crosshair:{mode:L.CrosshairMode.Normal}});this.candles=this.chart.addSeries(L.CandlestickSeries,{priceFormat:this.priceFormat,upColor:'#16d79b',downColor:'#ff526d',borderVisible:false,wickUpColor:'#16d79b',wickDownColor:'#ff526d'});this.candles.setData(this.data.candles);this.candles.priceScale().applyOptions({scaleMargins:{top:0.08,bottom:0.2}});this.volume=this.chart.addSeries(L.HistogramSeries,{priceFormat:{type:'volume'},priceScaleId:'volume',lastValueVisible:false,priceLineVisible:false});this.volume.setData(this.data.candles.map(c=>({time:c.time,value:c.volume,color:c.close>=c.open?'#16d79b38':'#ff526d38'})));this.volume.priceScale().applyOptions({scaleMargins:{top:0.82,bottom:0}});this.applyIndicators();const count=this.data.candles.length,from=this.fibCandidate&&this.interval===this.fibBasis?Math.max(0,this.fibCandidate.zone.from-16):Math.max(0,count-120);this.chart.timeScale().setVisibleLogicalRange({from,to:count+(this.fibCandidate?18:5)});}
+ preserveViewport(action,byTime=false){
+  const scale=this.chart?.timeScale?.(),get=()=>byTime?scale?.getVisibleRange?.():scale?.getVisibleLogicalRange?.();
+  const before=get(),result=action(),after=get();
+  if(before&&JSON.stringify(before)!==JSON.stringify(after)){if(byTime)scale.setVisibleRange(before);else scale.setVisibleLogicalRange(before)}
+  return result;
+ }
+ draw(){const last=this.data.candles.at(-1)?.close||1,precision=this.item?.type==='crypto'?Math.min(12,Math.max(2,4-Math.floor(Math.log10(last)))):2;this.priceFormat={type:'price',precision,minMove:10**-precision};this.destroy();this.element.replaceChildren();const L=LightweightCharts;this.chart=L.createChart(this.element,{autoSize:true,layout:{background:{color:'#0b1927'},textColor:'#8194a7',attributionLogo:true,panes:{separatorColor:'#183247'}},grid:{vertLines:{color:'#132a3c'},horzLines:{color:'#132a3c'}},rightPriceScale:{borderColor:'#183247',mode:this.options.fib==='off'?L.PriceScaleMode.Normal:L.PriceScaleMode.Logarithmic},timeScale:{borderColor:'#183247',rightOffset:4,shiftVisibleRangeOnNewBar:false,allowShiftVisibleRangeOnWhitespaceReplacement:false,timeVisible:this.interval.endsWith('m'),secondsVisible:false},localization:{locale:'ko-KR'},crosshair:{mode:L.CrosshairMode.Normal}});this.candles=this.chart.addSeries(L.CandlestickSeries,{priceFormat:this.priceFormat,upColor:'#16d79b',downColor:'#ff526d',borderVisible:false,wickUpColor:'#16d79b',wickDownColor:'#ff526d'});this.candles.setData(this.data.candles);this.candles.priceScale().applyOptions({scaleMargins:{top:0.08,bottom:0.2}});this.volume=this.chart.addSeries(L.HistogramSeries,{priceFormat:{type:'volume'},priceScaleId:'volume',lastValueVisible:false,priceLineVisible:false});this.volume.setData(this.data.candles.map(c=>({time:c.time,value:c.volume,color:c.close>=c.open?'#16d79b38':'#ff526d38'})));this.volume.priceScale().applyOptions({scaleMargins:{top:0.82,bottom:0}});this.applyIndicators();const count=this.data.candles.length,from=this.fibCandidate&&this.interval===this.fibBasis?Math.max(0,this.fibCandidate.zone.from-16):Math.max(0,count-120);this.chart.timeScale().setVisibleLogicalRange({from,to:count+(this.fibCandidate?18:5)});}
  applyIndicators(streamUpdate=false){
   if(!this.chart)return;
-  for(const series of this.series)this.chart.removeSeries(series);this.series=[];
-  if(this.cloud){this.candles.detachPrimitive(this.cloud);this.cloud=null}
-  if(this.fibCloud){this.candles.detachPrimitive(this.fibCloud);this.fibCloud=null}
-  if(this.fibMarkers){this.candles.detachPrimitive(this.fibMarkers);this.fibMarkers=null}
-  this.fibCandidate=null;this.fibStatus='';
-  const L=LightweightCharts,add=(data,color,pane=0,extra={})=>{const series=this.chart.addSeries(L.LineSeries,{priceFormat:this.priceFormat,color,lineWidth:1,lastValueVisible:false,priceLineVisible:false,crosshairMarkerVisible:false,...extra},pane);series.setData(data);this.series.push(series);return series};
+  const updating=streamUpdate,used=new Set();
+  if(!updating){for(const series of this.series)this.chart.removeSeries(series);this.series=[];this.indicatorSeries=new Map();
+   if(this.cloud){this.candles.detachPrimitive(this.cloud);this.cloud=null}
+   if(this.fibCloud){this.candles.detachPrimitive(this.fibCloud);this.fibCloud=null}
+   if(this.fibMarkers){this.candles.detachPrimitive(this.fibMarkers);this.fibMarkers=null}
+  }
+  this.indicatorSeries??=new Map();this.fibCandidate=null;this.fibStatus='';
+  const L=LightweightCharts,add=(data,color,pane=0,extra={})=>{
+   const key=pane+':'+color+':'+(extra.title??'');used.add(key);let series=this.indicatorSeries.get(key);
+   if(!series){series=this.chart.addSeries(L.LineSeries,{priceFormat:this.priceFormat,color,lineWidth:1,lastValueVisible:false,priceLineVisible:false,crosshairMarkerVisible:false,...extra},pane);this.series.push(series);this.indicatorSeries.set(key,series)}
+   series.setData(data);return series;
+  };
   const channelTimes=this.data.candles.map(c=>({time:c.time}));
   const colors={20:'#f4c95d',60:'#58adff',120:'#b58eff',200:'#f790ad'};
   for(const period of this.options.ma)add(HongIndicators.ma(this.data.candles,period),colors[period]);
-  if(this.options.ichi){const d=HongIndicators.ichimoku(this.data.candles,this.interval,this.item?.type==='crypto');channelTimes.push(...d.spanA,...d.spanB);add(d.conversion,'#4d9bff');add(d.base,'#ff765d');add(d.spanA,'#16d79b');add(d.spanB,'#ff526d');add(d.lag,'#bb8ae8');this.cloud=new IchimokuCloud(d.spanA,d.spanB);this.candles.attachPrimitive(this.cloud)}
+  if(this.options.ichi){const d=HongIndicators.ichimoku(this.data.candles,this.interval,this.item?.type==='crypto');channelTimes.push(...d.spanA,...d.spanB);add(d.conversion,'#4d9bff');add(d.base,'#ff765d');add(d.spanA,'#16d79b');add(d.spanB,'#ff526d');add(d.lag,'#bb8ae8');if(this.cloud)this.cloud.setData(d.spanA,d.spanB);else{this.cloud=new IchimokuCloud(d.spanA,d.spanB);this.candles.attachPrimitive(this.cloud)}}
   if(this.options.fib!=='off'){
    const candidate=this.selectedCandidate;this.fibCandidate=candidate;
    if(candidate){
@@ -205,13 +218,14 @@ window.HongChart=class {
     const priceAt=channelProjection(candidate,extended);
     for(const [ratio,color] of Object.entries(palette)){const r=Number(ratio),data=[];for(let i=0;i<extended.length;i++){const value=priceAt(i,r);if(Number.isFinite(value)&&value>0)data.push({time:extended[i].time,value})}add(data,color,0,{lineWidth:r===0||r===1?2:1,lastValueVisible:true,title:String(r),autoscaleInfoProvider:()=>null})}
     const first=chartSeconds(this.data.candles[0].time),last=chartSeconds(this.data.candles.at(-1).time),markers=candidate.anchors.filter(x=>chartSeconds(x.time)>=first&&chartSeconds(x.time)<=last).map((x,i)=>{const nearest=this.data.candles.reduce((best,row)=>Math.abs(chartSeconds(row.time)-chartSeconds(x.time))<Math.abs(chartSeconds(best.time)-chartSeconds(x.time))?row:best);return {time:nearest.time,position:this.options.fib==='high'?'aboveBar':'belowBar',color:'#edf7ff',shape:'circle',text:['①','②','③'][x.point-1]}});
-    this.fibMarkers=L.createSeriesMarkers(this.candles,markers);
+    if(this.fibMarkers)this.fibMarkers.setMarkers(markers);else this.fibMarkers=L.createSeriesMarkers(this.candles,markers);
 
-    this.fibCloud=new FibonacciBands(extended,candidate,priceAt);this.candles.attachPrimitive(this.fibCloud);
+    if(this.fibCloud){this.fibCloud.candles=extended;this.fibCloud.candidate=candidate;this.fibCloud.priceAt=priceAt;this.fibCloud.requestUpdate?.()}else{this.fibCloud=new FibonacciBands(extended,candidate,priceAt);this.candles.attachPrimitive(this.fibCloud)}
     this.fibStatus=(this.fibReason?this.fibReason+' · ':'')+(this.options.fib==='high'?'고–고–고':'저–저–저')+' · 오른쪽 연장 · ① '+anchorTime(candidate.anchors[0].time)+' · ② '+anchorTime(candidate.anchors[1].time)+' · 변곡 '+anchorTime(this.referenceData.candles[candidate.turn].time)+' · ③ '+anchorTime(candidate.anchors[2].time)+(candidate.active?' · 수집 기준 진행 구간'+(candidate.provisional?' · ③ 잠정':' · ③ 반전 확인'):'');
-   }else this.fibStatus=(this.fibReason?this.fibReason+' · ':'')+basisLabel(this.fibBasis||this.options.fibFrame)+' 기준에서 조건을 충족하는 후보가 없습니다.';
+   }else{if(this.fibCloud){this.candles.detachPrimitive(this.fibCloud);this.fibCloud=null}if(this.fibMarkers){this.candles.detachPrimitive(this.fibMarkers);this.fibMarkers=null}this.fibStatus=(this.fibReason?this.fibReason+' · ':'')+basisLabel(this.fibBasis||this.options.fibFrame)+' 기준에서 조건을 충족하는 후보가 없습니다.';}
   }
-  if(this.options.rsi){const rsi=HongIndicators.rsi(this.data.candles),series=add(rsi,'#b58eff',1,{priceScaleId:'right',priceFormat:{type:'price',precision:1,minMove:.1},lastValueVisible:true});series.priceScale().applyOptions({mode:L.PriceScaleMode.Normal,autoScale:true,scaleMargins:{top:.12,bottom:.12}});series.applyOptions({autoscaleInfoProvider:(base)=>{const range=base()?.priceRange;return {priceRange:{minValue:Math.min(20,range?.minValue??20),maxValue:Math.max(80,range?.maxValue??80)}}}});for(const value of [30,70])series.createPriceLine({price:value,color:'#71899c',lineWidth:1,lineStyle:2,axisLabelVisible:true,title:''});const panes=this.chart.panes();panes[0].setStretchFactor(4);panes[1].setStretchFactor(1.5)}
+  if(this.options.rsi){const rsi=HongIndicators.rsi(this.data.candles),series=add(rsi,'#b58eff',1,{priceScaleId:'right',priceFormat:{type:'price',precision:1,minMove:.1},lastValueVisible:true});if(!updating){series.priceScale().applyOptions({mode:L.PriceScaleMode.Normal,autoScale:true,scaleMargins:{top:.12,bottom:.12}});series.applyOptions({autoscaleInfoProvider:(base)=>{const range=base()?.priceRange;return {priceRange:{minValue:Math.min(20,range?.minValue??20),maxValue:Math.max(80,range?.maxValue??80)}}}});for(const value of [30,70])series.createPriceLine({price:value,color:'#71899c',lineWidth:1,lineStyle:2,axisLabelVisible:true,title:''});const panes=this.chart.panes();panes[0].setStretchFactor(4);panes[1].setStretchFactor(1.5)}}
+  if(updating)for(const [key,series] of this.indicatorSeries)if(!used.has(key)){this.chart.removeSeries(series);this.indicatorSeries.delete(key);this.series=this.series.filter(x=>x!==series)}
   if(streamUpdate)this.renderLiveSource();else this.renderControls();
  }
  renderLiveSource(){
@@ -273,7 +287,16 @@ window.HongChart=class {
   state.chartSlot.replaceWith(this.element);state.controlSlot.replaceWith(this.controls);state.root.remove();document.body.style.overflow=state.overflow;document.documentElement.style.overflow=state.htmlOverflow;window.scrollTo(0,state.scroll);this.controls.querySelector('[data-tool="fullscreen"]')?.focus({preventScroll:true});requestAnimationFrame(()=>{this.resize();requestAnimationFrame(()=>{if(range&&this.chart)this.chart.timeScale().setVisibleLogicalRange(range)})});
  }
 
- async refreshScalp(){const range=this.chart?.timeScale().getVisibleLogicalRange();await this.load(this.item);if(range&&this.chart)this.chart.timeScale().setVisibleLogicalRange(range)}
+ async refreshScalp(){
+  if(this.item?.tv.startsWith('BINANCE:')&&this.data?.nativeBinance&&this.chart){
+   const token=this.token,frame=this.options.fibFrame,mode=this.options.fib;
+   const reference=completedReference(frame===this.interval?this.data:await HongData.binanceBars(this.item.tv,frame),frame);
+   if(token!==this.token||!this.chart||mode!==this.options.fib||frame!==this.options.fibFrame)return;
+   this.referenceData=reference;this.fibBasis=frame;this.selectedCandidate=HongIndicators.fibonacci(reference.candles,mode,{interval:frame,currentPrice:this.data.candles.at(-1).close});
+   this.preserveViewport(()=>this.applyIndicators(true));return;
+  }
+  const range=this.chart?.timeScale().getVisibleLogicalRange();await this.load(this.item);if(range&&this.chart)this.chart.timeScale().setVisibleLogicalRange(range);
+ }
  resize(){if(this.chart)this.chart.resize(this.element.clientWidth,this.element.clientHeight)}
 };
 

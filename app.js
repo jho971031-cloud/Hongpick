@@ -15,7 +15,7 @@ async function api(path){
  return HongData.api(path);
 }
 let chartScripts;
-function ensureCharts(){if(!chartScripts)chartScripts=(async()=>{for(const name of ['fib-client.js?v=6.4.2','lightweight-charts.js','charts.js?v=6.4.2a'])await new Promise((resolve,reject)=>{const script=document.createElement('script');script.src=HongData.asset(name);script.onload=resolve;script.onerror=()=>{script.remove();reject(Error('차트 모듈을 불러오지 못했습니다.'))};document.head.append(script)})})().catch(error=>{chartScripts=null;throw error});return chartScripts}
+function ensureCharts(){if(!chartScripts)chartScripts=(async()=>{for(const name of ['fib-client.js?v=6.4.2','lightweight-charts.js','charts.js?v=6.4.3'])await new Promise((resolve,reject)=>{const script=document.createElement('script');script.src=HongData.asset(name);script.onload=resolve;script.onerror=()=>{script.remove();reject(Error('차트 모듈을 불러오지 못했습니다.'))};document.head.append(script)})})().catch(error=>{chartScripts=null;throw error});return chartScripts}
 function notice(root,text){root.innerHTML='<div class="empty">'+escapeHtml(text)+'</div>'}
 function source(d){return `${d.source||''}${d.kind||/13F|OGE|CNN|Fear|Alternative/.test(d.source||'')?'':' · 지연·주기 수집'} · 기준시각 ${formatDate(d.updated)}${d.stale?' · 이전 데이터':''}`}
 const pages=['menu','hongpicks','home','search','coins','gurus','turnover','fng','trump','watchlist'];
@@ -35,8 +35,8 @@ async function renderChart(item,mode='search'){if(!item?.tv)return;const searchM
 function openStock(item){if(item?.type==='crypto'||/^(BINANCE|CRYPTO):/.test(item?.tv||'')){show('coins');openCoin(item);return}state.search=item;const ready=!!charts.search;show('search');if(ready)renderChart(item,'search')}
 async function loadCoins(){
  if(coinPending)return coinPending;
- $('coinStatus').textContent='바이낸스 현물 거래대금을 불러오는 중…';
- coinPending=(async()=>{try{coinData=await api('/api/coins?kind=turnover');$('coinStatus').textContent=source(coinData);$('coinMethod').textContent=coinData.method;renderCoins()}catch(e){$('coinStatus').textContent=e.message;notice($('coinRows'),e.message)}finally{coinPending=null}})();return coinPending;
+ if(!coinChartVisible())$('coinStatus').textContent='바이낸스 현물 거래대금을 불러오는 중…';
+ coinPending=(async()=>{try{coinData=await api('/api/coins?kind=turnover');if(!coinChartVisible())$('coinStatus').textContent=source(coinData);$('coinMethod').textContent=coinData.method;if(!coinChartVisible()||!$('coinRows').querySelector('[data-coin-row]'))renderCoins()}catch(e){if(!coinChartVisible()||!coinData){$('coinStatus').textContent=e.message;notice($('coinRows'),e.message)}}finally{coinPending=null}})();return coinPending;
 }
 function renderCoins(){
  const n=Number($('coinLimit').value)||Infinity,rows=(coinData?.rows||[]).map(liveCoinRow).sort((a,b)=>b.turnover-a.turnover).map((x,i)=>({...x,rank:i+1})).slice(0,n);$('coinStatus').textContent='Binance Spot · '+coinLiveState+' · 순위: 24시간 체결대금 · 미수신 종목은 수집본'+(coinData?' · 수집 '+formatDate(coinData.updated):'');$('coinCount').textContent=rows.length+'개 / '+(coinData?.rows.length||0)+'개 USDT 현물';
@@ -145,9 +145,10 @@ setInterval(()=>{if(document.hidden||document.querySelector('.modal-back'))retur
 $('picksOversold').onchange=e=>{picksOversold=e.target.checked;renderPicks()};
 
 function liveCoinRow(row){const quote=liveQuotes.get(row.ticker||row.tv?.split(':')[1]);return quote&&coinLiveState.startsWith('실시간')&&Date.now()-quote.receivedAt<20000?{...row,...quote}: {...row,live:false}}
+function coinChartVisible(){const panel=$('coinChartPanel');if(panel.hidden)return false;if(charts.coins?.fullscreenState)return true;const r=panel.getBoundingClientRect();return r.top<window.innerHeight&&r.bottom>100}
 function paintLiveCoins(){
  if(state.page==='coins'){
-  if(coinData)renderCoins();const quote=coinSelected&&liveCoinRow(coinSelected);
+  if(coinData&&!coinChartVisible())renderCoins();const quote=coinSelected&&liveCoinRow(coinSelected);
   if(quote?.live){$('coinChartSub').textContent=number(quote.price,10)+' USDT · 24시간 '+percent(quote.change)+' · 실시간';$('coinQuoteSource').textContent='Binance Spot WebSocket · 마지막 수신 '+formatDate(quote.updated)+' · 24시간 체결대금 '+number(quote.turnover/1e6,2)+'M USDT'}
   else if(coinSelected)$('coinQuoteSource').textContent='Binance Spot · '+coinLiveState+' · 이전 시세 유지';
  }
