@@ -28,6 +28,7 @@ jobs:
           python -m unittest -v test_architecture.py
           node test_data_client.js
           node test_hongpicks.js
+          node test_live_data.js
       - uses: actions/cache@v4
         with:
           path: .snapshot-cache
@@ -54,3 +55,4 @@ jobs:
       - name: Deploy GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+
