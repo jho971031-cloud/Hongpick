@@ -27,6 +27,15 @@ class ArchitectureTests(unittest.TestCase):
             result=cache.cached(key,3600,fail)
             self.assertTrue(result['stale']);self.assertEqual(result['updated'],'2026-09-20T00:00:00+00:00')
             cache._items.pop(key,None)
+    def test_exported_javascript_assets_are_served_as_scripts(self):
+        client=server.app.test_client()
+        for asset in build_static.ASSETS:
+            if asset.endswith('.js'):
+                response=client.get('/'+asset)
+                self.assertEqual(response.status_code,200)
+                self.assertIn('javascript',response.mimetype)
+                self.assertFalse(response.data.lstrip().startswith(b'<!doctype html'))
+
     def test_only_existing_pages_origin_gets_public_api_cors(self):
         client=server.app.test_client()
         self.assertEqual(client.get('/api/turnover?market=invalid',headers={'Origin':'https://jho971031-cloud.github.io'}).headers.get('Access-Control-Allow-Origin'),'https://jho971031-cloud.github.io')

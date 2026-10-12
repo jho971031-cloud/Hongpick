@@ -117,7 +117,7 @@ def health():return jsonify(status='ok',version='6.4.0')
 def home():return send_from_directory(BASE,'index.html')
 @app.get('/<path:name>')
 def files(name):
-    if name in ['app.js','data-client.js','fib-client.js','charts.js','style.css','manifest.json','lightweight-charts.js','LICENSE-lightweight-charts.txt','responsive-check.html']:return send_from_directory(BASE,name)
+    if name in ['app.js','live-data.js','data-client.js','fib-client.js','charts.js','style.css','manifest.json','lightweight-charts.js','LICENSE-lightweight-charts.txt','responsive-check.html']:return send_from_directory(BASE,name)
     if re.fullmatch(r'data-[A-Za-z0-9-]+\.json',name):
         public=BASE/'public'
         return send_from_directory(public if (public/name).exists() else BASE,name)
