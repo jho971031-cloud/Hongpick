@@ -175,18 +175,18 @@ window.HongChart=class {
    if(row.time===last.time)this.data.candles[this.data.candles.length-1]=row;else this.data.candles.push(row);
    this.data.updated=parsed.updated;this.data.lastBar=row.time;this.data.formingTime=parsed.closed?null:row.time;this.data.stale=false;this.lastLive=parsed.updated;this.liveMode='실시간';seen=true;
    this.candles.update(row);this.volume.update({time:row.time,value:row.volume,color:row.close>=row.open?'#16d79b38':'#ff526d38'});
-   if(!this.liveIndicatorTimer)this.liveIndicatorTimer=setTimeout(()=>{this.liveIndicatorTimer=null;if(token===this.token&&epoch===this.liveEpoch&&this.chart)this.applyIndicators()},3000);
-   this.renderControls();
+   if(!this.liveIndicatorTimer)this.liveIndicatorTimer=setTimeout(()=>{this.liveIndicatorTimer=null;if(token===this.token&&epoch===this.liveEpoch&&this.chart)this.applyIndicators(true)},3000);
+   this.renderLiveSource();
   };
   this.liveClient=HongLive.subscribe([symbol.toLowerCase()+'@kline_'+HongLive.frame[interval]],apply,async status=>{
    if(token!==this.token||epoch!==this.liveEpoch)return;
-   if(status.mode==='connecting'&&(seen||Date.now()-Date.parse(this.data.updated)>15000)&&!syncing){syncing=true;try{const fresh=await HongData.binanceBars(this.item.tv,interval);if(token!==this.token||epoch!==this.liveEpoch||!this.chart)return;this.data=fresh;this.candles.setData(fresh.candles);this.volume.setData(fresh.candles.map(c=>({time:c.time,value:c.volume,color:c.close>=c.open?'#16d79b38':'#ff526d38'})));this.applyIndicators()}catch{this.liveMode='복구 대기 · 이전 수신값'}finally{syncing=false;if(pending){const p=pending;pending=null;apply(p)}}}
+   if(status.mode==='connecting'&&(seen||Date.now()-Date.parse(this.data.updated)>15000)&&!syncing){syncing=true;try{const fresh=await HongData.binanceBars(this.item.tv,interval);if(token!==this.token||epoch!==this.liveEpoch||!this.chart)return;this.data=fresh;this.candles.setData(fresh.candles);this.volume.setData(fresh.candles.map(c=>({time:c.time,value:c.volume,color:c.close>=c.open?'#16d79b38':'#ff526d38'})));this.applyIndicators(true)}catch{this.liveMode='복구 대기 · 이전 수신값'}finally{syncing=false;if(pending){const p=pending;pending=null;apply(p)}}}
    if(status.mode!=='receiving')this.liveMode={connecting:'연결 중',reconnecting:'재연결 중 · 이전 수신값',paused:'일시정지 · 이전 수신값'}[status.mode]||'수집본';
-   if(this.item?.tv.startsWith('BINANCE:'))this.renderControls();
+   if(this.item?.tv.startsWith('BINANCE:'))this.renderLiveSource();
   });
  }
  draw(){const last=this.data.candles.at(-1)?.close||1,precision=this.item?.type==='crypto'?Math.min(12,Math.max(2,4-Math.floor(Math.log10(last)))):2;this.priceFormat={type:'price',precision,minMove:10**-precision};this.destroy();this.element.replaceChildren();const L=LightweightCharts;this.chart=L.createChart(this.element,{autoSize:true,layout:{background:{color:'#0b1927'},textColor:'#8194a7',attributionLogo:true,panes:{separatorColor:'#183247'}},grid:{vertLines:{color:'#132a3c'},horzLines:{color:'#132a3c'}},rightPriceScale:{borderColor:'#183247',mode:this.options.fib==='off'?L.PriceScaleMode.Normal:L.PriceScaleMode.Logarithmic},timeScale:{borderColor:'#183247',rightOffset:4,timeVisible:this.interval.endsWith('m'),secondsVisible:false},localization:{locale:'ko-KR'},crosshair:{mode:L.CrosshairMode.Normal}});this.candles=this.chart.addSeries(L.CandlestickSeries,{priceFormat:this.priceFormat,upColor:'#16d79b',downColor:'#ff526d',borderVisible:false,wickUpColor:'#16d79b',wickDownColor:'#ff526d'});this.candles.setData(this.data.candles);this.candles.priceScale().applyOptions({scaleMargins:{top:0.08,bottom:0.2}});this.volume=this.chart.addSeries(L.HistogramSeries,{priceFormat:{type:'volume'},priceScaleId:'volume',lastValueVisible:false,priceLineVisible:false});this.volume.setData(this.data.candles.map(c=>({time:c.time,value:c.volume,color:c.close>=c.open?'#16d79b38':'#ff526d38'})));this.volume.priceScale().applyOptions({scaleMargins:{top:0.82,bottom:0}});this.applyIndicators();const count=this.data.candles.length,from=this.fibCandidate&&this.interval===this.fibBasis?Math.max(0,this.fibCandidate.zone.from-16):Math.max(0,count-120);this.chart.timeScale().setVisibleLogicalRange({from,to:count+(this.fibCandidate?18:5)});}
- applyIndicators(){
+ applyIndicators(streamUpdate=false){
   if(!this.chart)return;
   for(const series of this.series)this.chart.removeSeries(series);this.series=[];
   if(this.cloud){this.candles.detachPrimitive(this.cloud);this.cloud=null}
@@ -212,7 +212,11 @@ window.HongChart=class {
    }else this.fibStatus=(this.fibReason?this.fibReason+' · ':'')+basisLabel(this.fibBasis||this.options.fibFrame)+' 기준에서 조건을 충족하는 후보가 없습니다.';
   }
   if(this.options.rsi){const rsi=HongIndicators.rsi(this.data.candles),series=add(rsi,'#b58eff',1,{priceScaleId:'right',priceFormat:{type:'price',precision:1,minMove:.1},lastValueVisible:true});series.priceScale().applyOptions({mode:L.PriceScaleMode.Normal,autoScale:true,scaleMargins:{top:.12,bottom:.12}});series.applyOptions({autoscaleInfoProvider:(base)=>{const range=base()?.priceRange;return {priceRange:{minValue:Math.min(20,range?.minValue??20),maxValue:Math.max(80,range?.maxValue??80)}}}});for(const value of [30,70])series.createPriceLine({price:value,color:'#71899c',lineWidth:1,lineStyle:2,axisLabelVisible:true,title:''});const panes=this.chart.panes();panes[0].setStretchFactor(4);panes[1].setStretchFactor(1.5)}
-  this.renderControls();
+  if(streamUpdate)this.renderLiveSource();else this.renderControls();
+ }
+ renderLiveSource(){
+  const root=this.controls.querySelector?.(':scope > small.data-source');if(!root||!this.data)return;
+  root.innerHTML=escapeHtml(this.data.source)+' · 마지막 봉 '+this.data.lastBar+' · 수신 '+formatDate(this.data.updated)+(this.data.stale?' · 이전 데이터':'')+' · '+escapeHtml(this.liveMode||'연결 대기')+(this.lastLive?' · 마지막 스트림 '+formatDate(this.lastLive):'')+(this.fibStatus?'<br><span class="fib-status">'+basisLabel(this.fibBasis||this.options.fibFrame)+' 기준 · '+escapeHtml(this.fibStatus)+'</span>':'')+'<br>일목: 9 / 26 / 52 / 26 · 구름 불투명도 30% · <a href="https://www.tradingview.com/" target="_blank" rel="noopener noreferrer">Chart by TradingView Lightweight Charts</a>';
  }
  renderControls(){
   if(!this.item)return;if(this.fullscreenState)this.fullscreenState.root.querySelector('.chart-screen-toolbar b small').textContent=this.interval;const saved=state.watch.some(x=>x.tv===this.item.tv),fibLabel=this.options.fib==='high'?'고–고–고':this.options.fib==='low'?'저–저–저':'OFF';

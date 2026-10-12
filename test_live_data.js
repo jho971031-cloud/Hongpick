@@ -19,8 +19,8 @@ client.close();assert.equal(timers.size,0);listeners.online();assert.equal(socke
 // The chart must update only its own symbol, frame and current load generation.
 let callback;context.HongLive=context.window.HongLive={...live,subscribe:(s,data)=>{callback=data;return{close(){}}}};
 vm.runInContext(fs.readFileSync('charts.js','utf8'),context);const Chart=context.window.HongChart,c=new Chart({},{}),updates=[];
-c.item={tv:'BINANCE:BTCUSDT'};c.interval='5m';c.chart={};c.data={nativeBinance:true,candles:[{time:event.k.t/1000,open:100,high:110,low:90,close:100,volume:1}]};c.candles={update:r=>updates.push(r)};c.volume={update(){}};c.renderControls=()=>{};c.applyIndicators=()=>{};c.startLive();
-callback(event);assert.equal(c.data.candles.length,1);assert.equal(c.data.candles[0].close,105);assert.equal(updates.length,1);
+c.item={tv:'BINANCE:BTCUSDT'};c.interval='5m';c.chart={};c.data={nativeBinance:true,candles:[{time:event.k.t/1000,open:100,high:110,low:90,close:100,volume:1}]};c.candles={update:r=>updates.push(r)};c.volume={update(){}};let controlsRendered=0;c.renderControls=()=>controlsRendered++;c.applyIndicators=()=>{};c.startLive();
+callback(event);assert.equal(c.data.candles.length,1);assert.equal(c.data.candles[0].close,105);assert.equal(updates.length,1);assert.equal(controlsRendered,0,'stream updates must not replace clickable controls');
 callback({...event,k:{...event.k,s:'ETHUSDT'}});assert.equal(updates.length,1);
 callback({...event,k:{...event.k,t:event.k.t-300000}});assert.equal(updates.length,1);
 c.stopLive();callback(event);assert.equal(updates.length,1);assert.equal(timers.size,0);
