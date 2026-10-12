@@ -3,8 +3,8 @@ window.HongLive=(()=>{
  const frame={D:'1d',W:'1w',M:'1M','1m':'1m','5m':'5m','15m':'15m'};
  const clients=new Set();
  function ticker(x){
-  if(x?.e!=='24hrTicker'||!String(x.s).endsWith('USDT'))return null;
-  const price=Number(x.c),change=Number(x.P),turnover=Number(x.q),event=Number(x.E);
+  if(!['24hrTicker','24hrMiniTicker'].includes(x?.e)||!String(x.s).endsWith('USDT'))return null;
+  const price=Number(x.c),change=x.e==='24hrMiniTicker'&&Number(x.o)>0?(Number(x.c)/Number(x.o)-1)*100:Number(x.P),turnover=Number(x.q),event=Number(x.E);
   if(![price,change,turnover,event].every(Number.isFinite)||price<=0||turnover<0||Math.abs(Date.now()-event)>60000)return null;
   return {ticker:x.s,tv:'BINANCE:'+x.s,price,change,turnover,updated:new Date(event).toISOString(),receivedAt:Date.now(),currency:'USDT',source:'Binance Spot WebSocket',live:true};
  }

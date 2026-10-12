@@ -5,6 +5,8 @@ const context={window:{addEventListener:(name,fn)=>listeners[name]=fn},document:
 vm.createContext(context);vm.runInContext(fs.readFileSync('live-data.js','utf8'),context);const live=context.window.HongLive;
 const tick={e:'24hrTicker',s:'BTCUSDT',c:'90000',P:'-2.5',q:'123456789',E:Date.now()};
 assert.equal(live.ticker(tick).turnover,123456789);assert.equal(live.ticker({...tick,E:Date.now()-120000}),null);assert.equal(live.ticker({...tick,c:'NaN'}),null);assert.equal(live.ticker({...tick,s:'BTCBUSD'}),null);
+assert.equal(live.ticker({...tick,e:'24hrMiniTicker',c:'110',o:'100',P:undefined}).change.toFixed(2),'10.00');
+assert.equal(live.ticker({...tick,e:'24hrMiniTicker',o:'0',P:undefined}),null);
 const event={e:'kline',E:Date.now(),k:{s:'BTCUSDT',i:'5m',t:Math.floor(Date.now()/300000)*300000,o:'100',h:'110',l:'90',c:'105',v:'4',x:false}};
 assert.equal(live.candle(event,'5m').row.volume,4);assert.equal(live.candle(event,'15m'),null);assert.equal(live.candle({...event,k:{...event.k,l:'109'}},'5m'),null);
 let messages=0;const states=[];const client=live.subscribe(['btcusdt@ticker'],()=>messages++,s=>states.push(s.mode));

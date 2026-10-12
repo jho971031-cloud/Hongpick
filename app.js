@@ -15,7 +15,7 @@ async function api(path){
  return HongData.api(path);
 }
 let chartScripts;
-function ensureCharts(){if(!chartScripts)chartScripts=(async()=>{for(const name of ['fib-client.js?v=6.4.0','lightweight-charts.js','charts.js?v=6.4.0'])await new Promise((resolve,reject)=>{const script=document.createElement('script');script.src=HongData.asset(name);script.onload=resolve;script.onerror=()=>{script.remove();reject(Error('차트 모듈을 불러오지 못했습니다.'))};document.head.append(script)})})().catch(error=>{chartScripts=null;throw error});return chartScripts}
+function ensureCharts(){if(!chartScripts)chartScripts=(async()=>{for(const name of ['fib-client.js?v=6.4.1','lightweight-charts.js','charts.js?v=6.4.1'])await new Promise((resolve,reject)=>{const script=document.createElement('script');script.src=HongData.asset(name);script.onload=resolve;script.onerror=()=>{script.remove();reject(Error('차트 모듈을 불러오지 못했습니다.'))};document.head.append(script)})})().catch(error=>{chartScripts=null;throw error});return chartScripts}
 function notice(root,text){root.innerHTML='<div class="empty">'+escapeHtml(text)+'</div>'}
 function source(d){return `${d.source||''}${d.kind||/13F|OGE|CNN|Fear|Alternative/.test(d.source||'')?'':' · 지연·주기 수집'} · 기준시각 ${formatDate(d.updated)}${d.stale?' · 이전 데이터':''}`}
 const pages=['menu','hongpicks','home','search','coins','gurus','turnover','fng','trump','watchlist'];
@@ -163,7 +163,7 @@ function paintLiveCoins(){
 }
 function syncLiveQuotes(){
  if(!window.HongLive)return;
- const streams=state.page==='coins'?['!ticker@arr']:state.page==='home'?['btcusdt@ticker']:state.page==='watchlist'&&watchMarket==='coin'?state.watch.filter(x=>x.tv.startsWith('BINANCE:')).map(x=>x.tv.split(':')[1].toLowerCase()+'@ticker'):[];
+ const streams=state.page==='coins'?['!miniTicker@arr']:state.page==='home'?['btcusdt@ticker']:state.page==='watchlist'&&watchMarket==='coin'?state.watch.filter(x=>x.tv.startsWith('BINANCE:')).map(x=>x.tv.split(':')[1].toLowerCase()+'@ticker'):[];
  const key=streams.join('/');if(key===coinLiveKey)return;coinLiveClient?.close();coinLiveClient=null;coinLiveKey=key;clearTimeout(livePaintTimer);livePaintTimer=null;
  if(!key){coinLiveState='일시정지';return}
  coinLiveClient=HongLive.subscribe(streams,data=>{
