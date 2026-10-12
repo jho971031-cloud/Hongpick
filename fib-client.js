@@ -2,6 +2,7 @@
  const original=HongData.api.bind(HongData);
  HongData.api=async path=>{
   const url=new URL(path,location.origin);
+  if(['/api/history','/api/fib-history'].includes(url.pathname)&&url.searchParams.get('symbol')?.startsWith('BINANCE:')){try{return await HongData.binanceBars(url.searchParams.get('symbol'),url.pathname==='/api/fib-history'?'W':url.searchParams.get('interval')||'D')}catch{}}
   if(url.pathname==='/api/history'&&['1m','5m','15m'].includes(url.searchParams.get('interval'))){
    const tv=url.searchParams.get('symbol'),interval=url.searchParams.get('interval'),native=interval;let data;
    if(HongData.staticMode){try{const m=await HongData.manifest(),record=(native==='1m'?m.intradayHistories:m['intraday'+parseInt(native)+'Histories'])?.[tv];if(record){const r=await fetch(HongData.asset(record.file),{cache:'no-store'});if(r.ok)data=await r.json()}}catch{}}
