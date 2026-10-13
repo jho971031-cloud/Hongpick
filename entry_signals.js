@@ -10,7 +10,7 @@ function evaluateTouch(days,t,at,meta){
  for(let j=t;j<=Math.min(t+2,days.length-1);j++)if(days[j].close>touch.high&&days[j].close>days[j-1].close){confirmed=j;break;}
  const distance=(last.close/current-1)*100;
  const broken=last.close<current||days.slice(t).some(x=>x.close<at(x.time)*.99);
- const late=distance>(confirmed>=0?5:3)||!Number.isFinite(meta.headroom)||meta.headroom<=3||confirmed>=0&&days.length-1-confirmed>3;
+ const late=distance>(confirmed>=0?5:3)||!Number.isFinite(meta.headroom)||meta.headroom<=3||(confirmed>=0?days.length-1-confirmed>3:days.length-1-t>2);
  const status=broken?'broken':late?'late':confirmed>=0?'confirmed':'approach';
  return {...meta,status,active:status==='confirmed'||status==='approach',touchDate:touch.time,touchLow:touch.low,touchLine:support,confirmationDate:confirmed>=0?days[confirmed].time:null,distance,line:current,points:status==='confirmed'?(meta.provisional?20:25):status==='approach'&&distance>=0&&distance<=3?(meta.provisional?10:15):0};
 }

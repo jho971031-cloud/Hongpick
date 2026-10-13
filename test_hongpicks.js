@@ -14,6 +14,8 @@ test('Entry capture requires support touch then a completed close above touch hi
  assert.equal(x.status,'confirmed');assert.equal(x.touchDate,'2026-10-08');assert.equal(x.confirmationDate,'2026-10-09');assert.equal(x.points,25);
  assert.equal(evaluateTouch(bars.slice(0,4),3,()=>100,touchMeta).status,'approach');
  assert.equal(evaluateTouch(bars,3,()=>100,{...touchMeta,provisional:true}).points,20);
+ const pending=touchBars();pending[4].close=101;pending[5].close=101;pending.push({...pending.at(-1),time:'2026-10-11'});
+ assert.equal(evaluateTouch(pending,3,()=>100,touchMeta).active,false,'unconfirmed contact expires after two sessions');
 });
 test('Entry capture rejects late pursuit, overhead resistance, broken support and hindsight point 3',()=>{
  const bars=touchBars();bars.at(-1).close=108;
