@@ -6,7 +6,7 @@ const {screen:codexScreen}=require('./rank_codexpicks');
 const codexNow=new Date('2026-10-13T01:00:00Z');
 const codexDaily=prices=>({candles:bars(prices).map((c,i)=>({...c,time:new Date(Date.UTC(2026,9,12)-(prices.length-1-i)*86400000).toISOString().slice(0,10)})),source:'explicit test fixture',updated:codexNow.toISOString()});
 const codexItem={tv:'NASDAQ:TEST',market:'us',weekly:null};
-const {evaluateTouch,scanEntries}=require('./entry_signals');
+const {evaluateTouch,scanEntries,availableDate,touchedBefore}=require('./entry_signals');
 const touchBars=()=>[110,110,109,101,103,104].map((close,i)=>({time:`2026-10-${String(5+i).padStart(2,'0')}`,open:i===3?100:close,close,low:i===3?99:close-1,high:i===3?102:close+1,volume:100}));
 const touchMeta={frame:'D',thirdTime:'2026-10-01',knownAt:'2026-10-03',headroom:20,provisional:false};
 test('Entry capture requires support touch then a completed close above touch high',()=>{
@@ -24,6 +24,12 @@ test('Entry capture rejects late pursuit, overhead resistance, broken support an
  const broken=touchBars();broken.at(-1).close=99;assert.equal(evaluateTouch(broken,3,()=>100,touchMeta).status,'broken');
  assert.equal(evaluateTouch(touchBars(),3,()=>100,{...touchMeta,knownAt:'2026-10-09'}),null);
  const under=touchBars();under[2].close=99;assert.equal(evaluateTouch(under,3,()=>100,touchMeta),null,'contact from below is not support');
+});
+test('Weekly values become known at week close, and old repeated touches are not the first pullback',()=>{
+ assert.equal(availableDate('2026-10-05','W'),'2026-10-09');assert.equal(availableDate('2026-10-09','W'),'2026-10-09');
+ assert.equal(availableDate('2026-10-05','D'),'2026-10-05');
+ assert.equal(touchedBefore(touchBars(),3,()=>100,'2026-10-01'),false);
+ assert.equal(touchedBefore(touchBars(),5,()=>100,'2026-10-01'),true);
 });
 test('Early channel generation sees only candles known at each candidate contact date',()=>{
  const days=codexDaily(Array.from({length:80},()=>100)).candles,seen=[];
