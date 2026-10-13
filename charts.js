@@ -52,7 +52,7 @@ window.HongIndicators = {
  },
  fibonacci(candles,mode='high',settings={}) {
   if(['5m','15m'].includes(settings.interval))return this.intradayFibonacci(candles,mode,settings);
-  const frame=settings.interval||'W',daily=frame==='D',monthly=frame==='M',near=monthly?1:3,major=monthly?2:8,minBars=monthly?18:60,minGap=monthly?3:daily?20:26,maxGap=monthly?24:daily?252:208,touchLookback=monthly?6:26,touchSpread=monthly?2:daily?5:8,minTouches=monthly?2:3,retrace=daily?.08:.15,minSwing=daily?.18:monthly?.20:.30;
+  const frame=settings.interval||'W',daily=frame==='D',monthly=frame==='M',near=monthly?1:settings.early?1:3,major=monthly?2:8,minBars=monthly?18:60,minGap=monthly?3:daily?20:26,maxGap=monthly?24:daily?252:208,touchLookback=monthly?6:26,touchSpread=monthly?2:daily?5:8,minTouches=monthly?2:3,retrace=daily?.08:.15,minSwing=daily?.18:monthly?.20:.30;
   if(!['high','low'].includes(mode)||candles.length<minBars)return null;
   const source=candles,rows=mode==='low'?source.map(c=>({...c,open:1/c.open,high:1/c.low,low:1/c.high,close:1/c.close})):source,n=rows.length;
   const piv=[];for(let i=near;i<n-near-1;i++)if(rows[i].high===Math.max(...rows.slice(i-near,i+near+1).map(x=>x.high)))piv.push(i);
@@ -70,7 +70,7 @@ window.HongIndicators = {
    if(piv.some(i=>i>b&&i<turn&&rows[i].high>=rows[b].high*.995))continue;
    const baseLow=Math.min(...rows.slice(b+1,turn+1).map(x=>x.low));
    if(baseLow>rows[b].high*(1-(daily?.04:monthly?.06:.08)))continue;
-   const peakWindow=monthly?3:daily?10:13;
+   const fullPeakWindow=monthly?3:daily?10:13,peakWindow=settings.early&&!monthly?2:fullPeakWindow;
    const cs=piv.filter(i=>i>turn+1&&i>=peakWindow&&i+peakWindow<n&&rows[i].high===Math.max(...rows.slice(i-peakWindow,i+peakWindow+1).map(x=>x.high))&&Math.min(...rows.slice(i+1,i+peakWindow+1).map(x=>x.low))<=rows[i].high*(1-retrace));
    if(!cs.length)continue;const c=cs[0];if(c-turn>(monthly?12:65))continue;
    for(const a of piv){
@@ -83,7 +83,7 @@ window.HongIndicators = {
     let slope=(Math.log(rows[b].high)-Math.log(ceiling))/(b-a),width=Math.log(rows[c].high)-Math.log(ceiling)-slope*(c-a);if(width<=0)continue;
     let zone={from:touches[0],to:touches.at(-1),floor:ceiling*.94,ceiling:ceiling*1.01};
     if(mode==='low'){slope=-slope;width=-width;zone={from:zone.from,to:zone.to,floor:1/zone.ceiling,ceiling:1/zone.floor}}
-    found.push({mode,a,b,c,turn,slope,width,zone,score:swing*100+Math.min(b-a,156)*.12+touches.length*.5-(n-1-c)*(daily?.06:monthly?1:.3),anchors:[a,b,c].map((index,j)=>({point:j+1,index,time:source[index].time,price:mode==='high'?source[index].high:source[index].low}))});
+    found.push({mode,a,b,c,turn,slope,width,zone,...(settings.early?{active:true,provisional:c+fullPeakWindow>=n}:{}),score:swing*100+Math.min(b-a,156)*.12+touches.length*.5-(n-1-c)*(daily?.06:monthly?1:.3),anchors:[a,b,c].map((index,j)=>({point:j+1,index,time:source[index].time,price:mode==='high'?source[index].high:source[index].low}))});
    }
   }
   const final=new Map();for(const x of found){const key=x.a+':'+x.c,old=final.get(key);if(!old||x.b>old.b)final.set(key,x)}

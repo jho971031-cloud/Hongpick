@@ -6,6 +6,28 @@ const {screen:codexScreen}=require('./rank_codexpicks');
 const codexNow=new Date('2026-10-13T01:00:00Z');
 const codexDaily=prices=>({candles:bars(prices).map((c,i)=>({...c,time:new Date(Date.UTC(2026,9,12)-(prices.length-1-i)*86400000).toISOString().slice(0,10)})),source:'explicit test fixture',updated:codexNow.toISOString()});
 const codexItem={tv:'NASDAQ:TEST',market:'us',weekly:null};
+const {evaluateTouch,scanEntries}=require('./entry_signals');
+const touchBars=()=>[110,110,109,101,103,104].map((close,i)=>({time:`2026-10-${String(5+i).padStart(2,'0')}`,open:i===3?100:close,close,low:i===3?99:close-1,high:i===3?102:close+1,volume:100}));
+const touchMeta={frame:'D',thirdTime:'2026-10-01',knownAt:'2026-10-03',headroom:20,provisional:false};
+test('Entry capture requires support touch then a completed close above touch high',()=>{
+ const bars=touchBars(),x=evaluateTouch(bars,3,()=>100,touchMeta);
+ assert.equal(x.status,'confirmed');assert.equal(x.touchDate,'2026-10-08');assert.equal(x.confirmationDate,'2026-10-09');assert.equal(x.points,25);
+ assert.equal(evaluateTouch(bars.slice(0,4),3,()=>100,touchMeta).status,'approach');
+ assert.equal(evaluateTouch(bars,3,()=>100,{...touchMeta,provisional:true}).points,20);
+});
+test('Entry capture rejects late pursuit, overhead resistance, broken support and hindsight point 3',()=>{
+ const bars=touchBars();bars.at(-1).close=108;
+ assert.equal(evaluateTouch(bars,3,()=>100,touchMeta).points,0);
+ assert.equal(evaluateTouch(touchBars(),3,()=>100,{...touchMeta,headroom:2}).status,'late');
+ const broken=touchBars();broken.at(-1).close=99;assert.equal(evaluateTouch(broken,3,()=>100,touchMeta).status,'broken');
+ assert.equal(evaluateTouch(touchBars(),3,()=>100,{...touchMeta,knownAt:'2026-10-09'}),null);
+ const under=touchBars();under[2].close=99;assert.equal(evaluateTouch(under,3,()=>100,touchMeta),null,'contact from below is not support');
+});
+test('Early channel generation sees only candles known at each candidate contact date',()=>{
+ const days=codexDaily(Array.from({length:80},()=>100)).candles,seen=[];
+ scanEntries(days,[],{fibonacci:(rows,mode,settings)=>{seen.push({end:rows.at(-1).time,price:settings.currentPrice});assert.equal(settings.early,true);return null}},()=>100);
+ assert.equal(seen.length,10);assert.deepEqual([...new Set(seen.map(x=>x.end))],days.slice(-5).map(x=>x.time));
+});
 test('Codex excludes expired, stale and invalid prices instead of promoting missing data',()=>{
  const d=codexDaily(Array.from({length:260},(_,i)=>100+i));
  assert.throws(()=>codexScreen(codexItem,{...d,updated:'2025-01-01'},codexNow),/만료/);

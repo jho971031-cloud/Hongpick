@@ -150,7 +150,7 @@ def history(tv,interval='D'):
         candles=sorted({x['time']:x for x in candles if x['close']>0}.values(),key=lambda x:x['time'])
         if len(candles)<2:raise ValueError('OHLCV unavailable')
         return {'candles':candles,'source':source,'sourceUrl':source_url,'updated':now(),'lastBar':candles[-1]['time'],'interval':'D','adjustment':'제공원 OHLCV 기준. 기업행사에 따라 제공원별 조정 방식이 다를 수 있습니다.'}
-    data=cached('history:'+tv,int(os.getenv('HONGPICK_HISTORY_TTL','900')),load,'data-history-'+tv.replace(':','-')+'.json')
+    data=cached('history-entry-v66:'+tv,int(os.getenv('HONGPICK_HISTORY_TTL','900')),load,'data-history-'+tv.replace(':','-')+'.json')
     if interval=='D':return data
     groups={}
     for c in data['candles']:

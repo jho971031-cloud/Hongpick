@@ -16,7 +16,7 @@ def build(output,refresh=False,cache_dir=None):
     if refresh:
         os.environ['HONGPICK_SYNC_COLLECTION']='1'
         os.environ['HONGPICK_CACHE_DIR']=str(cache_dir or BASE/'.snapshot-cache')
-        os.environ['HONGPICK_HISTORY_TTL']='21600'
+        os.environ['HONGPICK_HISTORY_TTL']='1800'
     manifest={'version':'5.2','generatedAt':p.now(),'resources':{},'histories':{},'failures':[],
               'schedule':'시장 데이터 약 30분 · 일봉/13F 6시간 · 공시 목록 1시간. 예약 실행이 지연될 수 있습니다.'}
     def write(name,data):

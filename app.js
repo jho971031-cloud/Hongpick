@@ -10,14 +10,14 @@ const charts={};
 let overviewBtc=null;
 let coinLiveClient=null,coinLiveKey='',coinLiveState='연결 대기',liveQuotes=new Map(),livePaintTimer=null;
 let coinData=null,coinSelected=null,coinPending=null,coinSearchToken=0,watchMarket='stock';
-let picksPending=null,picksData=null,picksMarket='all',picksOversold=false;
+let picksPending=null,picksData=null,picksMarket='all',picksOversold=false,picksEntryOnly=false;
 let codexPending=null,codexData=null,codexMarket='all',codexStrategy='all';
 let chartPicksKind='hong';
 async function api(path){
  return HongData.api(path);
 }
 let chartScripts;
-function ensureCharts(){if(!chartScripts)chartScripts=(async()=>{for(const name of ['fib-client.js?v=6.4.2','lightweight-charts.js','charts.js?v=6.4.3'])await new Promise((resolve,reject)=>{const script=document.createElement('script');script.src=HongData.asset(name);script.onload=resolve;script.onerror=()=>{script.remove();reject(Error('차트 모듈을 불러오지 못했습니다.'))};document.head.append(script)})})().catch(error=>{chartScripts=null;throw error});return chartScripts}
+function ensureCharts(){if(!chartScripts)chartScripts=(async()=>{for(const name of ['fib-client.js?v=6.4.2','lightweight-charts.js','charts.js?v=6.6.0'])await new Promise((resolve,reject)=>{const script=document.createElement('script');script.src=HongData.asset(name);script.onload=resolve;script.onerror=()=>{script.remove();reject(Error('차트 모듈을 불러오지 못했습니다.'))};document.head.append(script)})})().catch(error=>{chartScripts=null;throw error});return chartScripts}
 function notice(root,text){root.innerHTML='<div class="empty">'+escapeHtml(text)+'</div>'}
 function source(d){return `${d.source||''}${d.kind||/13F|OGE|CNN|Fear|Alternative/.test(d.source||'')?'':' · 지연·주기 수집'} · 기준시각 ${formatDate(d.updated)}${d.stale?' · 이전 데이터':''}`}
 const pages=['menu','hongpicks','codexpicks','home','search','coins','gurus','turnover','fng','trump','watchlist'];
@@ -186,16 +186,18 @@ async function openCodexPick(item){
  if(!item)return;try{await ensureCharts();if(!charts.search)charts.search=new HongChart($('searchChart'),$('searchIndicators'));const chart=charts.search;chart.options.ma=new Set([20,60,200]);chart.options.rsi=true;chart.options.fib='off';chart.options.fibFrame='W';chart.channelSelection=null;chart.interval='D';openStock(item)}catch{openStock(item)}
 }
 for(const [id,key]of [['codexMarket','market'],['codexStrategy','strategy']])$(id).onchange=e=>{if(key==='market')codexMarket=e.target.value;else codexStrategy=e.target.value;renderCodexPicks()};
+function entryLabel(e){return !e?'빗각 매매자리 없음':({confirmed:'지지 반등 확인',approach:'지지 접근 · 관찰',late:'반등 후 이격 · 저항 주의',broken:'지지 이탈'}[e.status])+(e.provisional?' · ③ 잠정':'')}
 function isDailyOversold(x){return Number.isFinite(x.rsi)&&x.rsi<=30}
 function pickRow(x,index,compact=false){
- const stars='★'.repeat(x.stars)+'☆'.repeat(5-x.stars),week=x.weekly;
- const badges=[`<span class="${isDailyOversold(x)?'met':''}">일봉 RSI ${number(x.rsi,1)}${isDailyOversold(x)?' · 과매도':''}</span>`,`<span class="${week?.side==='support'&&week.distance<5?'met':''}">${week?'주봉 지지 후보 '+number(week.distance,1)+'%':'주봉 지지 후보 없음'}</span>`,`<span class="${x.golden?.matched?'met':''}">${x.golden?.matched?'골든크로스 '+x.golden.date:x.golden?'골든크로스 없음':'MA 데이터 없음'}</span>`,`<span class="${x.rally>=10?'met':''}">본장 ${percent(x.rally)}</span>`];
- return `<button class="pick-row ${compact?'compact':''}" data-pick-tv="${escapeHtml(x.tv)}"><span class="pick-rank">${index+1}</span><span class="pick-info"><b>${escapeHtml(x.name)}</b><small>${escapeHtml(x.ticker)} · ${x.market==='kr'?'한국':'미국'} · ${number(x.price)} ${escapeHtml(x.currency||'')}</small><span class="pick-signals">${badges.join('')}</span>${compact?'':`<small>본장 기준 ${escapeHtml(x.sessionDate)}${x.stale?' · 이전 수집 데이터':''}${week?' · '+(week.mode==='high'?'고–고–고':'저–저–저')+' 레벨 '+week.ratio+' · '+number(week.line)+' '+escapeHtml(x.currency||''):''}</small>`}</span><span class="pick-rating"><span class="pick-stars" aria-label="추천 별 ${x.stars}개 / 5개">${stars}</span><small>${number(x.score)} / 100</small>${x.score===0?'<small>신호 없음</small>':''}</span></button>`;
+ const stars='★'.repeat(x.stars)+'☆'.repeat(5-x.stars),week=x.weekly,entry=x.entry;
+ const badges=[`<span class="${entry?.active?'met':''}">${escapeHtml(entryLabel(entry))}${entry?' · '+(entry.frame==='W'?'주봉':'일봉')+' '+number(entry.distance,1)+'%':''}</span>`,`<span class="${isDailyOversold(x)?'met':''}">일봉 RSI ${number(x.rsi,1)}${isDailyOversold(x)?' · 과매도':''}</span>`,`<span class="${week?.side==='support'&&week.distance<5&&x.points.weekly>0?'met':''}">${week?'주봉 지지 후보 '+number(week.distance,1)+'%':'주봉 지지 후보 없음'}</span>`,`<span class="${x.golden?.matched?'met':''}">${x.golden?.matched?'골든크로스 '+x.golden.date:x.golden?'골든크로스 없음':'MA 데이터 없음'}</span>`,`<span class="${x.rally>=10?'met':''}">본장 ${percent(x.rally)}</span>`];
+ return `<button class="pick-row ${compact?'compact':''}" data-pick-tv="${escapeHtml(x.tv)}"><span class="pick-rank">${index+1}</span><span class="pick-info"><b>${escapeHtml(x.name)}</b><small>${escapeHtml(x.ticker)} · ${x.market==='kr'?'한국':'미국'} · ${number(x.price)} ${escapeHtml(x.currency||'')}</small><span class="pick-signals">${badges.join('')}</span>${compact?'':`<small>본장 기준 ${escapeHtml(x.sessionDate)}${x.stale?' · 이전 수집 데이터':''}${entry?' · 접촉 '+(entry.touchDate||'대기')+' · 반등 확인 '+(entry.confirmationDate||'대기')+' · 위 저항 여유 '+(entry.headroom==null?'미확인':number(entry.headroom,1)+'%'):''}${week?' · '+(week.mode==='high'?'고–고–고':'저–저–저')+' 레벨 '+week.ratio+' · '+number(week.line)+' '+escapeHtml(x.currency||''):''}</small>`}</span><span class="pick-rating"><span class="pick-stars" aria-label="추천 별 ${x.stars}개 / 5개">${stars}</span><small>${number(x.score)} / 100</small>${x.score===0?'<small>신호 없음</small>':''}</span></button>`;
 }
 function renderPicks(){
- if(!picksData)return;const all=picksData.rows||[],rows=all.filter(x=>(picksMarket==='all'||x.market===picksMarket)&&(!picksOversold||isDailyOversold(x))).slice(0,50);
- $('picksTitle').textContent=(picksMarket==='all'?'전체':picksMarket==='us'?'미국':'한국')+' 홍픽종목 TOP50';$('picksCount').textContent=`${rows.length}개 표시${picksOversold?' · 일봉 RSI(14) ≤30 과매도':''} · ${all.length}/${picksData.candidateCount}개 분석`;
- $('picksList').innerHTML=rows.length?rows.map((x,i)=>pickRow(x,i)).join(''):'<div class="empty">'+(all.length&&picksOversold?'선택한 시장에서 일봉 과매도 조건을 충족하는 종목이 없습니다.':'분석 가능한 실제 데이터가 없습니다.')+'</div>'; 
+ if(!picksData)return;const all=picksData.rows||[],rows=all.filter(x=>(picksMarket==='all'||x.market===picksMarket)&&(!picksOversold||isDailyOversold(x))&&(!picksEntryOnly||x.entry?.active)).sort((a,b)=>picksEntryOnly?(({confirmed:0,approach:1}[a.entry.status])-({confirmed:0,approach:1}[b.entry.status])||b.points.weekly-a.points.weekly||b.score-a.score):b.score-a.score).slice(0,50);
+ $('picksTitle').textContent=(picksMarket==='all'?'전체':picksMarket==='us'?'미국':'한국')+' 홍픽종목 TOP50';$('picksCount').textContent=`${rows.length}개 표시${picksEntryOnly?' · 빗각 매매자리':''}${picksOversold?' · 일봉 RSI(14) ≤30 과매도':''} · ${all.length}/${picksData.candidateCount}개 분석`;
+ $('picksList').innerHTML=rows.length?rows.map((x,i)=>pickRow(x,i)).join(''):'<div class="empty">'+(all.length&&picksEntryOnly?'현재 선택한 조건에서 지지 접근·최근 반등 확인 종목이 없습니다.':all.length&&picksOversold?'선택한 시장에서 일봉 과매도 조건을 충족하는 종목이 없습니다.':'분석 가능한 실제 데이터가 없습니다.')+'</div>'; 
+ const entries=all.filter(x=>x.entry?.active).sort((a,b)=>({confirmed:0,approach:1}[a.entry.status])-({confirmed:0,approach:1}[b.entry.status])||b.points.weekly-a.points.weekly);$('homeEntries').innerHTML=entries.length?entries.slice(0,5).map((x,i)=>pickRow(x,i,true)).join(''):'<div class="empty">현재 지지 접근·최근 반등 확인 조건을 통과한 종목이 없습니다.</div>';
  $('homePicks').innerHTML=all.length?all.slice(0,10).map((x,i)=>pickRow(x,i,true)).join(''):'<div class="empty">분석 가능한 실제 데이터가 없습니다.</div>';
  for(const id of ['picksSource','homePicksSource'])$(id).textContent=source(picksData)+' · 일봉 종가 기준 · 약 30분마다 수집'+(picksData.failures?.length?' · '+picksData.failures.length+'개 종목 일봉 데이터 없음':'');
  document.querySelectorAll('[data-pick-tv]').forEach(b=>b.onclick=()=>openPick(all.find(x=>x.tv===b.dataset.pickTv)));
@@ -203,7 +205,7 @@ function renderPicks(){
 }
 async function openPick(item){
  chartPicksKind='hong';
- if(!item)return;try{await ensureCharts();if(!charts.search)charts.search=new HongChart($('searchChart'),$('searchIndicators'));charts.search.options.fib=item.weekly?.mode||'off';charts.search.options.fibFrame='W';charts.search.channelSelection=null;charts.search.interval='W';openStock(item)}catch(error){openStock(item)}
+ if(!item)return;try{await ensureCharts();if(!charts.search)charts.search=new HongChart($('searchChart'),$('searchIndicators'));const chart=charts.search,e=item.entry;chart.options.fib=e?.active?e.mode:item.weekly?.mode||'off';chart.options.fibFrame=e?.active?e.frame:'W';chart.channelSelection=e?.active?{key:item.tv+':'+e.mode+':'+e.frame,frame:e.frame,reference:{candles:e.reference,source:e.referenceSource,updated:e.referenceUpdated,lastBar:e.reference.at(-1).time,interval:e.frame},candidate:e.candidate,reason:'매매자리 탐지 기준 고정 · '+entryLabel(e)}:null;chart.interval=e?.active?'D':'W';chart.options.rsi=true;openStock(item)}catch(error){openStock(item)}
 }
 document.addEventListener('click',e=>{const button=e.target.closest('[data-pick-market]');if(button){picksMarket=button.dataset.pickMarket;document.querySelectorAll('[data-pick-market]').forEach(b=>b.classList.toggle('sel',b===button));renderPicks()}});
 
@@ -213,6 +215,7 @@ document.querySelector('.brand').addEventListener('keydown',e=>{if(e.key==='Ente
 
 setInterval(()=>{if(document.hidden||document.querySelector('.modal-back'))return;for(const c of Object.values(charts)){const bucket=Math.floor(Date.now()/(parseInt(c.options.fibFrame)*60000||900000));if(['5m','15m'].includes(c.options.fibFrame)&&!c.expandedTool&&c.options.fib!=='off'&&(c.fullscreenState||c.element.closest('.page.active'))&&c.lastScalpRefreshBucket!==bucket){c.lastScalpRefreshBucket=bucket;c.refreshScalp()}}},60000);
 
+$('picksEntryOnly').onchange=e=>{picksEntryOnly=e.target.checked;renderPicks()};document.addEventListener('click',e=>{if(e.target.closest('[data-show-entries]')){picksEntryOnly=true;$('picksEntryOnly').checked=true;show('hongpicks');renderPicks()}});
 $('picksOversold').onchange=e=>{picksOversold=e.target.checked;renderPicks()};
 
 function liveCoinRow(row){const quote=liveQuotes.get(row.ticker||row.tv?.split(':')[1]);return quote&&coinLiveState.startsWith('실시간')&&Date.now()-quote.receivedAt<20000?{...row,...quote}: {...row,live:false}}

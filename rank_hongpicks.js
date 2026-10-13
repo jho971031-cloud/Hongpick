@@ -4,6 +4,8 @@ const context={window:{}};vm.createContext(context);
 vm.runInContext(fs.readFileSync(path.join(__dirname,'charts.js'),'utf8'),context);
 const indicators=context.window.HongIndicators;
 const project=vm.runInContext('channelPrice',context);
+const projection=vm.runInContext('channelProjection',context),position=vm.runInContext('referencePosition',context);
+const {scanEntries}=require('./entry_signals');
 const RULES={rsi:60,weekly:25,golden:10,rally:5};
 function completedDaily(candles,market,now=new Date()){
  const parts=Object.fromEntries(new Intl.DateTimeFormat('en-CA',{timeZone:market==='kr'?'Asia/Seoul':'America/New_York',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(now).map(x=>[x.type,x.value]));
@@ -50,7 +52,11 @@ function analyze(item,daily,weekly,now=new Date()){
  const last=candles.at(-1),rsi=indicators.rsi(candles).at(-1)?.value??null;
  const weekRows=weekly?.candles?.filter(c=>c.time<=last.time)||[];
  const levels=weeklyDistance(weekRows,last.close,last.time,'both'),channel=levels?.support??null,golden=goldenCross(candles),rally=(last.close/candles.at(-2).close-1)*100;
- return {...item,market,price:last.close,change:rally,sessionDate:last.time,rsi,weekly:channel,weeklyNearest:levels?.nearest??null,golden,rally,...scoreMetrics(rsi,channel,golden,rally),missing:[...(!channel?['주봉 지지 후보 없음']:[]),...(!golden?['MA60 계산 기간 부족']:[])],dailySource:daily.source,dailyUpdated:daily.updated,weeklySource:levels?.nearest?weekly.source:null,weeklyUpdated:levels?.nearest?weekly.updated:null,stale:!!(daily.stale||weekly?.stale||item.stale)};
+ const fresh=Number.isFinite(collected.getTime())&&now-collected<=7*86400000&&now-new Date(last.time+'T00:00:00Z')<=7*86400000&&!daily.stale;
+ const entryProject=(candidate,reference,time,ratio)=>projection(candidate,candles)(position(time,candles),ratio);
+ const entry=fresh?scanEntries(candles,!weekly?.stale&&validCandles(weekRows)?weekRows:[],indicators,entryProject):null;
+ const ranking=scoreMetrics(rsi,null,golden,rally);ranking.points.weekly=entry?.points||0;ranking.score=Number(Object.values(ranking.points).reduce((a,b)=>a+b,0).toFixed(2));ranking.stars=ranking.score>=80?5:ranking.score>=60?4:ranking.score>=40?3:ranking.score>=20?2:ranking.score>0?1:0;
+ return {...item,market,price:last.close,change:rally,sessionDate:last.time,rsi,weekly:channel,weeklyNearest:levels?.nearest??null,entry:entry?{...entry,referenceSource:entry.frame==='W'?weekly.source:daily.source,referenceUpdated:entry.frame==='W'?weekly.updated:daily.updated}:null,golden,rally,...ranking,missing:[...(!channel?['주봉 지지 후보 없음']:[]),...(!golden?['MA60 계산 기간 부족']:[])],dailySource:daily.source,dailyUpdated:daily.updated,weeklySource:levels?.nearest?weekly.source:null,weeklyUpdated:levels?.nearest?weekly.updated:null,stale:!!(daily.stale||weekly?.stale||item.stale)};
 }
 function build(root,manifest){
  const read=name=>JSON.parse(fs.readFileSync(path.join(root,name),'utf8'));
@@ -68,7 +74,7 @@ function build(root,manifest){
  rows.sort((a,b)=>b.score-a.score||a.rsi-b.rsi||(a.weekly?.distance??Infinity)-(b.weekly?.distance??Infinity)||a.tv.localeCompare(b.tv));
  rows.forEach((x,i)=>x.rank=i+1);
  const updated=[...Object.values(coverage).map(x=>x.updated),...rows.map(x=>x.dailyUpdated)].filter(Boolean).sort().at(-1)||null;
- return {rows,source:'TradingView Screener / NAVER Finance / Yahoo Finance · 실제 OHLCV 계산',updated,generatedAt:new Date().toISOString(),stale:stale||rows.some(x=>x.stale),coverage,failures,candidateCount:candidates.size,rules:RULES,method:'한국·미국 거래대금 TOP50의 주식 대상. 완료된 일봉 RSI(14) ≤30: 45~60점 · 주봉 고–고–고/저–저–저 채널 중 종가 아래 가장 가까운 지지 후보, 종가 대비 5% 미만 (종가 위 저항은 가점 제외): 0~25점 · 최근 5거래일 MA20/60 골든크로스 유지: 10점 · 최근 완료 본장 종가의 전일 대비 +10% 이상: 5점. 주봉 채널 레벨 0 / 0.5 / 1 / 1.5 / 2 / 2.5 / 3. 미확인 항목은 0점이며 데이터 없음으로 표시. 별 5개 80점 이상 / 4개 60점 이상 / 3개 40점 이상 / 2개 20점 이상 / 1개 0점 초과 / 0개 신호 없음.'};
+ return {rows,source:'TradingView Screener / NAVER Finance / Yahoo Finance · 실제 OHLCV 계산',updated,generatedAt:new Date().toISOString(),stale:stale||rows.some(x=>x.stale),coverage,failures,candidateCount:candidates.size,rules:RULES,method:'한국·미국 거래대금 TOP50의 주식 대상. 완료된 일봉 RSI(14) ≤30: 45~60점 · 주봉·일봉 ③ 이후 지지 접근·최근 반등 확인: 0~25점. 최근 5일 접촉 탐색, 2일 이내 접촉봉 고가 종가 돌파, 확인 후 3일 이내·지지 위 5% 이내·위 저항 여유 3% 초과. 초기 ③은 이후 2봉 탐색으로 잠정 표시하며 탐지일 이후 데이터로 기준점을 소급 선택하지 않음 · 최근 5거래일 MA20/60 골든크로스 유지: 10점 · 최근 완료 본장 종가의 전일 대비 +10% 이상: 5점. 주봉 채널 레벨 0 / 0.5 / 1 / 1.5 / 2 / 2.5 / 3. 미확인 항목은 0점이며 데이터 없음으로 표시. 별 5개 80점 이상 / 4개 60점 이상 / 3개 40점 이상 / 2개 20점 이상 / 1개 0점 초과 / 0개 신호 없음.'};
 }
 if(require.main===module){const root=path.resolve(process.argv[2]||'public'),manifest=JSON.parse(fs.readFileSync(path.join(root,'data-manifest.json'),'utf8'));fs.writeFileSync(path.join(root,'data-hongpicks.json'),JSON.stringify(build(root,manifest)));}
 module.exports={analyze,scoreMetrics,goldenCross,weeklyDistance,selectWeeklyLevels,completedDaily,validCandles,build};
