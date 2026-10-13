@@ -12,6 +12,7 @@ let coinLiveClient=null,coinLiveKey='',coinLiveState='연결 대기',liveQuotes=
 let coinData=null,coinSelected=null,coinPending=null,coinSearchToken=0,watchMarket='stock';
 let picksPending=null,picksData=null,picksMarket='all',picksOversold=false;
 let codexPending=null,codexData=null,codexMarket='all',codexStrategy='all';
+let chartPicksKind='hong';
 async function api(path){
  return HongData.api(path);
 }
@@ -29,11 +30,12 @@ function show(id,updateHash=true){
  if(id==='coins'){loadCoins();if(coinSelected&&!charts.coins)openCoin(coinSelected)}
  if(id==='home'){loadOverview();loadFng();loadGurus();loadPicks();loadCodexPicks()}if(id==='hongpicks')loadPicks();if(id==='codexpicks')loadCodexPicks();
  if(id==='search'&&!charts.search)renderChart(state.search||{tv:'NASDAQ:NVDA',symbol:'NASDAQ:NVDA',name:'NVIDIA',ticker:'NVDA'},'search');
+ if(id==='search')loadChartPicks();
  requestAnimationFrame(()=>{Object.values(charts).forEach(x=>{x.resize();if(x.item?.tv.startsWith('BINANCE:')){if(id==='coins')x.startLive();else x.stopLive()}});syncLiveQuotes()});
 }
 window.addEventListener('hashchange',()=>{const id=location.hash.slice(1)||'home';if(id!==state.page)show(id,false)});
-async function renderChart(item,mode='search'){if(!item?.tv)return;const searchMode=mode==='search',key=searchMode?'search':'current';state[key]=item;$(searchMode?'searchTitle':'chartTitle').textContent=item.name||item.ticker||item.symbol;$(searchMode?'searchSub':'turnChartSub').textContent=item.tv;const target=$(searchMode?'searchChart':'chart'),controls=$(searchMode?'searchIndicators':'turnIndicators');if(searchMode)loadDetails(item);try{await ensureCharts();if(state[key]?.tv!==item.tv)return;if(!charts[mode])charts[mode]=new HongChart(target,controls);charts[mode].load(item)}catch(e){notice(target,e.message)}}
-function openStock(item){if(item?.type==='crypto'||/^(BINANCE|CRYPTO):/.test(item?.tv||'')){show('coins');openCoin(item);return}state.search=item;const ready=!!charts.search;show('search');if(ready)renderChart(item,'search')}
+async function renderChart(item,mode='search'){if(!item?.tv)return;const searchMode=mode==='search',key=searchMode?'search':'current';state[key]=item;$(searchMode?'searchTitle':'chartTitle').textContent=item.name||item.ticker||item.symbol;$(searchMode?'searchSub':'turnChartSub').textContent=item.tv;const target=$(searchMode?'searchChart':'chart'),controls=$(searchMode?'searchIndicators':'turnIndicators');if(searchMode){loadDetails(item);renderChartPicks()}try{await ensureCharts();if(state[key]?.tv!==item.tv)return;if(!charts[mode])charts[mode]=new HongChart(target,controls);charts[mode].load(item)}catch(e){notice(target,e.message)}}
+function openStock(item){if(item?.type==='crypto'||/^(BINANCE|CRYPTO):/.test(item?.tv||'')){show('coins');openCoin(item);return}state.search=item;const ready=!!charts.search;show('search');if(ready)renderChart(item,'search');renderChartPicks()}
 async function loadCoins(){
  if(coinPending)return coinPending;
  if(!coinChartVisible())$('coinStatus').textContent='바이낸스 현물 거래대금을 불러오는 중…';
@@ -116,12 +118,22 @@ $('status').textContent=HongData.staticMode?'● 주기 수집 · 실제 데이�
 
 async function loadPicks(){
  if(picksPending)return picksPending;
- picksPending=(async()=>{try{picksData=await api('/api/hongpicks');renderPicks()}catch(error){for(const id of ['picksList','homePicks'])notice($(id),error.message);for(const id of ['picksSource','homePicksSource'])$(id).textContent='추천 데이터 없음 · 다른 메뉴는 계속 사용할 수 있습니다.'}finally{picksPending=null}})();return picksPending;
+ picksPending=(async()=>{try{picksData=await api('/api/hongpicks');renderPicks()}catch(error){for(const id of ['picksList','homePicks'])notice($(id),error.message);for(const id of ['picksSource','homePicksSource'])$(id).textContent='추천 데이터 없음 · 다른 메뉴는 계속 사용할 수 있습니다.';if(chartPicksKind==='hong'){notice($('chartPicksList'),error.message);$('chartPicksSource').textContent='TOP10 데이터 없음'}}finally{picksPending=null}})();return picksPending;
 }
 async function loadCodexPicks(){
  if(codexPending)return codexPending;
- codexPending=(async()=>{try{codexData=await api('/api/codexpicks');renderCodexPicks()}catch(e){for(const id of ['codexList','homeCodex'])notice($(id),e.message);$('codexSource').textContent='선별 데이터 없음 · 다음 수집에서 다시 시도합니다.'}finally{codexPending=null}})();return codexPending;
+ codexPending=(async()=>{try{codexData=await api('/api/codexpicks');renderCodexPicks()}catch(e){for(const id of ['codexList','homeCodex'])notice($(id),e.message);$('codexSource').textContent='선별 데이터 없음 · 다음 수집에서 다시 시도합니다.';if(chartPicksKind==='codex'){notice($('chartPicksList'),e.message);$('chartPicksSource').textContent='TOP10 데이터 없음'}}finally{codexPending=null}})();return codexPending;
 }
+function loadChartPicks(){renderChartPicks();return chartPicksKind==='hong'?loadPicks():loadCodexPicks()}
+function renderChartPicks(){
+ const data=chartPicksKind==='hong'?picksData:codexData,rows=(data?.rows||[]).slice(0,10);
+ $('chartPicksTitle').textContent=(chartPicksKind==='hong'?'홍픽종목':'Codex 픽')+' TOP10';
+ document.querySelectorAll('[data-chart-picks]').forEach(b=>b.classList.toggle('sel',b.dataset.chartPicks===chartPicksKind));
+ $('chartPicksList').innerHTML=rows.length?rows.map((x,i)=>chartPicksKind==='hong'?pickRow(x,i,true):codexRow(x,i,true)).join(''):'<div class="empty">'+(data?'현재 표시할 픽 종목이 없습니다.':'TOP10을 불러오는 중…')+'</div>';
+ $('chartPicksSource').textContent=data?source(data)+' · 전체 순위 TOP10 · 종목을 누르면 위 차트가 변경됩니다.':'선택한 픽 목록을 불러오는 중…';
+ $('chartPicksList').querySelectorAll('[data-pick-tv],[data-codex-tv]').forEach(b=>{const tv=b.dataset.pickTv||b.dataset.codexTv,item=rows.find(x=>x.tv===tv),current=state.search?.tv===tv;b.classList.toggle('current-pick',current);if(current)b.setAttribute('aria-current','true');b.onclick=()=>{if(current)return;chartPicksKind==='hong'?openPick(item):openCodexPick(item)}});
+}
+document.addEventListener('click',e=>{const b=e.target.closest('[data-chart-picks]');if(b){chartPicksKind=b.dataset.chartPicks;loadChartPicks()}});
 function codexRow(x,index,compact=false){
  const signals=codexStrategy==='all'||compact?x.signals:x.signals.filter(s=>s.key===codexStrategy),best=[...signals].sort((a,b)=>b.score-a.score)[0],score=best.score,stars=score>=90?5:score>=75?4:score>=60?3:2;
  return `<article class="codex-card"><button class="pick-row ${compact?'compact':''}" data-codex-tv="${escapeHtml(x.tv)}"><span class="pick-rank">${index+1}</span><span class="pick-info"><b>${escapeHtml(x.name)}</b><small>${escapeHtml(x.ticker)} · ${x.market==='kr'?'한국':'미국'} · ${number(x.price)} ${escapeHtml(x.currency||'')} · ${escapeHtml(x.sessionDate)} 종가</small><span class="pick-signals">${signals.map(s=>'<span class="met">'+escapeHtml(s.name)+'</span>').join('')}</span><small>${escapeHtml(best.reasons.join(' · '))}</small></span><span class="pick-rating"><span class="pick-stars" aria-label="조건 강도 ${stars}개 / 5개">${'★'.repeat(stars)+'☆'.repeat(5-stars)}</span><small>${score} / 100</small><small>차트 보기 →</small></span></button>${compact?'':`<details class="codex-evidence"><summary>선정 근거 · 조건 해제 기준 · 데이터</summary>${signals.map(s=>`<p><b>${escapeHtml(s.name)} · ${s.score}점</b><br>${escapeHtml(s.thesis||'')}<br>${s.reasons.map(escapeHtml).join('<br>')}<br><span class="data-source">${escapeHtml(s.invalidation)}</span><br><a href="${escapeHtml(s.url||'')}" target="_blank" rel="noopener">${escapeHtml(s.author||'기법 설명')}</a><br>${escapeHtml(s.applied||'')}<br><span class="data-source">미검증: ${escapeHtml(s.unverified||'')}</span></p>`).join('')}${x.channelContext?`<p class="codex-channel-note">주봉 빗각 참고 · 선별 가점 없음<br>${escapeHtml(x.channelContext.state==='resistance'?'종가 위 저항 후보에 접근 중입니다. 아래에서 접촉하는 것만으로 매수 근거가 되지 않습니다. 돌파와 지지 확인은 별도 검증이 필요합니다.':x.channelContext.state==='supportCandidate'?'종가 아래 지지 후보가 있습니다. 가까이 있다는 사실만으로 실제 지지 반등이 확인되지는 않습니다.':'가까운 채널 접촉 조건이 없습니다.')}<br>레벨 ${x.channelContext.ratio} · ${number(x.channelContext.line)} ${escapeHtml(x.currency||'')} · 종가와 ${number(x.channelContext.distance)}%</p>`:''}<p class="data-source">${escapeHtml(x.dailySource)} · 수집 ${formatDate(x.dailyUpdated)}${x.weeklySource?'<br>'+escapeHtml(x.weeklySource)+' · 주봉 수집 '+formatDate(x.weeklyUpdated):''}${x.missing?.length?'<br>미확인 항목: '+x.missing.map(escapeHtml).join(' · '):''}</p></details>`}</article>`;
@@ -137,8 +149,10 @@ function renderCodexPicks(){
  for(const id of ['codexSource','homeCodexSource'])$(id).textContent=source(codexData)+' · 완료 일봉 기준 · 약 30분마다 계산 · 규칙 '+codexData.ruleVersion;
  $('codexExcluded').innerHTML=(codexData.excluded||[]).map(x=>'<p>'+escapeHtml(x.tv)+' · '+escapeHtml(x.reason)+'</p>').join('')||'<p>제외 종목 없음</p>';
  document.querySelectorAll('[data-codex-tv]').forEach(b=>b.onclick=()=>openCodexPick(all.find(x=>x.tv===b.dataset.codexTv)));
+ if(chartPicksKind==='codex')renderChartPicks();
 }
 async function openCodexPick(item){
+ chartPicksKind='codex';
  if(!item)return;try{await ensureCharts();if(!charts.search)charts.search=new HongChart($('searchChart'),$('searchIndicators'));const chart=charts.search;chart.options.ma=new Set([20,60,200]);chart.options.rsi=true;chart.options.fib='off';chart.options.fibFrame='W';chart.channelSelection=null;chart.interval='D';openStock(item)}catch{openStock(item)}
 }
 for(const [id,key]of [['codexMarket','market'],['codexStrategy','strategy']])$(id).onchange=e=>{if(key==='market')codexMarket=e.target.value;else codexStrategy=e.target.value;renderCodexPicks()};
@@ -155,8 +169,10 @@ function renderPicks(){
  $('homePicks').innerHTML=all.length?all.slice(0,10).map((x,i)=>pickRow(x,i,true)).join(''):'<div class="empty">분석 가능한 실제 데이터가 없습니다.</div>';
  for(const id of ['picksSource','homePicksSource'])$(id).textContent=source(picksData)+' · 일봉 종가 기준 · 약 30분마다 수집'+(picksData.failures?.length?' · '+picksData.failures.length+'개 종목 일봉 데이터 없음':'');
  document.querySelectorAll('[data-pick-tv]').forEach(b=>b.onclick=()=>openPick(all.find(x=>x.tv===b.dataset.pickTv)));
+ if(chartPicksKind==='hong')renderChartPicks();
 }
 async function openPick(item){
+ chartPicksKind='hong';
  if(!item)return;try{await ensureCharts();if(!charts.search)charts.search=new HongChart($('searchChart'),$('searchIndicators'));charts.search.options.fib=item.weekly?.mode||'off';charts.search.options.fibFrame='W';charts.search.channelSelection=null;charts.search.interval='W';openStock(item)}catch(error){openStock(item)}
 }
 document.addEventListener('click',e=>{const button=e.target.closest('[data-pick-market]');if(button){picksMarket=button.dataset.pickMarket;document.querySelectorAll('[data-pick-market]').forEach(b=>b.classList.toggle('sel',b===button));renderPicks()}});

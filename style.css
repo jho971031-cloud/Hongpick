@@ -36,3 +36,5 @@ html,body{overflow-x:clip}html{scroll-padding-top:80px}
 .codex-card{min-width:0;border-bottom:1px solid #183247}.codex-card .pick-row{border-bottom:0}.codex-evidence{padding:0 12px 14px 40px;color:#afc1ce;font-size:12px;line-height:1.75;overflow-wrap:anywhere}.codex-evidence summary{cursor:pointer;color:#00cda1}.codex-evidence p{margin:10px 0}.pick-rules a{color:#45c9f3}.filters select{max-width:100%;background:#102438;color:#edf5fb;border:1px solid #244258;border-radius:8px;padding:10px}.filters label{min-width:0}#codexExcluded{max-height:280px;overflow:auto}@media(max-width:760px){.codex-evidence{padding-left:28px;font-size:11px}#codexpicks .filters{display:grid;grid-template-columns:1fr}#codexpicks select{width:100%;margin-top:6px}}
 
 .codex-evidence a{color:#45c9f3}.codex-channel-note{border-left:2px solid #e4af51;padding:10px;background:#18252a;color:#cfbd96}
+
+.chart-picks .current-pick{border-left:3px solid #16d79b;background:#0d2929;padding-left:8px}.chart-picks .tabs{margin-bottom:8px}
