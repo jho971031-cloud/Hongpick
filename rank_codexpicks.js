@@ -23,7 +23,8 @@ function screen(item,daily,now=new Date()){
  const volumeBars=bars.slice(-51,-1),volumeValid=volumeBars.length===50&&volumeBars.every(x=>Number.isFinite(x.volume)&&x.volume>=0)&&Number.isFinite(last.volume)&&last.volume>=0;
  const avgVolume=volumeValid?volumeBars.reduce((s,x)=>s+x.volume,0)/50:null,volumeRatio=avgVolume>0?last.volume/avgVolume:null;
  const priorHigh=bars.length>=253?Math.max(...bars.slice(-253,-1).map(x=>x.high)):null;
- const channelContext=!item.stale&&item.weekly?{...item.weekly,state:item.weekly.distance>3?'distant':item.weekly.line>last.close?'resistance':'supportCandidate'}:null;
+ const nearest=item.weeklyNearest||item.weekly;
+ const channelContext=!item.stale&&nearest?{...nearest,state:nearest.distance>3?'distant':nearest.line>last.close?'resistance':'supportCandidate'}:null;
  const signals=[],add=(key,score,reasons,invalidation)=>signals.push({key,name:strategies[key],score,reasons,invalidation,...rationale[key]});
  if(trend&&rsi>=40&&rsi<=70)add('trend',60+(rsi<=60?10:0)+(last.close/m20<=1.05?10:0)+(item.golden?.matched?10:0),['종가 > MA20 > MA60 > MA200','MA60 최근 5거래일 상승',`일봉 RSI ${rsi.toFixed(1)}`,`MA20 대비 +${((last.close/m20-1)*100).toFixed(1)}%`],`종가가 MA60 ${m60.at(-1).value.toFixed(2)} 아래로 내려가면 추세 조건 재검토`);
  let crossed=false,crossDate=null;

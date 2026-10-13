@@ -1,5 +1,5 @@
 const test=require('node:test'),assert=require('node:assert/strict');
-const {scoreMetrics,completedDaily,analyze,goldenCross,build}=require('./rank_hongpicks');
+const {scoreMetrics,completedDaily,analyze,goldenCross,selectWeeklyLevels,build}=require('./rank_hongpicks');
 const fs=require('node:fs'),os=require('node:os'),path=require('node:path');
 const bars=prices=>prices.map((close,i)=>({time:new Date(Date.UTC(2025,0,1+i)).toISOString().slice(0,10),open:close,high:close*1.01,low:close*.99,close,volume:100}));
 const {screen:codexScreen}=require('./rank_codexpicks');
@@ -49,10 +49,10 @@ test('Codex channel context never creates a pick or changes scores; overhead lin
  assert.equal(codexScreen({...codexItem,weekly:{line:100,distance:1}},trendDaily,codexNow).score,codexScreen(codexItem,trendDaily,codexNow).score);
 });
 test('RSI oversold has more weight than all later conditions combined; missing values do not invent points',()=>{
- assert.ok(scoreMetrics(30,null,null,null).score>scoreMetrics(31,{distance:0},{matched:true},10).score);
+ assert.ok(scoreMetrics(30,null,null,null).score>scoreMetrics(31,{distance:0,side:'support'},{matched:true},10).score);
  assert.deepEqual(scoreMetrics(null,null,null,null),{points:{rsi:0,weekly:0,golden:0,rally:0},score:0,stars:0});
- assert.equal(scoreMetrics(20,{distance:0},{matched:true},10).stars,5);
- assert.equal(scoreMetrics(31,{distance:5},{matched:false},9.99).score,0);
+ assert.equal(scoreMetrics(20,{distance:0,side:'support'},{matched:true},10).stars,5);
+ assert.equal(scoreMetrics(31,{distance:5,side:'support'},{matched:false},9.99).score,0);
 });
 test('Completed regular-session days use market timezone, not UTC day or after-hours price',()=>{
  const data=[{time:'2026-09-29'},{time:'2026-09-30'}];
@@ -64,7 +64,7 @@ test('Completed regular-session days use market timezone, not UTC day or after-h
 test('Daily RSI and rally are calculated from returned closes, and weekly absence remains explicit',()=>{
  const daily={candles:bars(Array.from({length:65},(_,i)=>200-i)),source:'verified fixture',updated:'2025-03-07'};
  const result=analyze({tv:'NASDAQ:TEST',price:9999},daily,null,new Date('2026-09-30'));
- assert.equal(result.rsi,0);assert.equal(result.price,136);assert.equal(result.weekly,null);assert.equal(result.points.weekly,0);assert.ok(result.missing.includes('주봉 채널 없음'));
+ assert.equal(result.rsi,0);assert.equal(result.price,136);assert.equal(result.weekly,null);assert.equal(result.points.weekly,0);assert.ok(result.missing.includes('주봉 지지 후보 없음'));
  assert.ok(Math.abs(result.rally-(136/137-1)*100)<1e-9);
  assert.equal(analyze({tv:'NASDAQ:TEST'},{candles:bars([NaN])},null),null);
 });
@@ -91,4 +91,13 @@ test('Export excludes funds, preserves source dates, reports failed stocks and o
   const result=build(root,{resources:{'turnover-kr':'kr.json','turnover-us':'us.json'},histories:{'NASDAQ:LOW':{file:'low.json'},'NASDAQ:HIGH':{file:'high.json'}},fibHistories:{}});
   assert.equal(result.rows.length,2);assert.equal(result.candidateCount,3);assert.equal(result.rows[0].tv,'NASDAQ:LOW');assert.equal(result.updated,'2025-03-07');assert.equal(result.failures[0].tv,'NASDAQ:MISSING');assert.equal(result.rows[1].stars,0);
  }finally{fs.rmSync(root,{recursive:true,force:true})}
+});
+
+test('Hong picks chooses support below price even when resistance is closer; resistance gets zero points',()=>{
+ const levels=selectWeeklyLevels([{line:101,distance:1},{line:97,distance:3},{line:96,distance:4}],100);
+ assert.equal(levels.support.line,97);assert.equal(levels.nearest.side,'resistance');
+ assert.equal(scoreMetrics(null,levels.support,null,null).points.weekly,10);
+ assert.equal(scoreMetrics(null,levels.nearest,null,null).points.weekly,0);
+ assert.equal(selectWeeklyLevels([{line:101,distance:1}],100).support,null);
+ assert.equal(scoreMetrics(null,{side:'support',distance:5},null,null).points.weekly,0);
 });

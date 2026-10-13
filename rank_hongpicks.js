@@ -11,7 +11,12 @@ function completedDaily(candles,market,now=new Date()){
  return candles.filter(c=>c.time<today||c.time===today&&closed);
 }
 function validCandles(rows){return Array.isArray(rows)&&rows.every((c,i)=>/^\d{4}-\d{2}-\d{2}$/.test(c.time)&&['open','high','low','close'].every(k=>Number.isFinite(c[k])&&c[k]>0)&&c.high>=Math.max(c.open,c.close,c.low)&&c.low<=Math.min(c.open,c.close)&&(!i||rows[i-1].time<c.time));}
-function weeklyDistance(reference,price,time){
+function selectWeeklyLevels(choices,price){
+ const valid=choices.filter(x=>Number.isFinite(x.line)&&x.line>0&&Number.isFinite(x.distance)&&x.distance>=0).sort((a,b)=>a.distance-b.distance);
+ const support=valid.find(x=>x.line<=price)||null,nearest=valid[0]||null;
+ return {support:support?{...support,side:'support'}:null,nearest:nearest?{...nearest,side:nearest.line<=price?'support':'resistance'}:null};
+}
+function weeklyDistance(reference,price,time,kind='support'){
  if(!validCandles(reference)||reference.length<60)return null;
  const choices=[];
  for(const mode of ['high','low']){
@@ -21,7 +26,7 @@ function weeklyDistance(reference,price,time){
    choices.push({distance:Math.abs(line/price-1)*100,line,ratio,mode,anchors:channel.anchors});
   }
  }
- return choices.sort((a,b)=>a.distance-b.distance)[0]||null;
+ const levels=selectWeeklyLevels(choices,price);return kind==='both'?levels:levels.support;
 }
 function goldenCross(candles){
  if(candles.length<61)return null;
@@ -32,7 +37,7 @@ function goldenCross(candles){
  return {matched:false,date:null};
 }
 function scoreMetrics(rsi,weekly,golden,rally){
- const points={rsi:rsi!=null&&rsi<=30?Math.min(60,45+(30-rsi)*1.5):0,weekly:weekly!=null?25*Math.max(0,1-weekly.distance/5):0,golden:golden?.matched?10:0,rally:rally!=null&&rally>=10?5:0};
+ const points={rsi:rsi!=null&&rsi<=30?Math.min(60,45+(30-rsi)*1.5):0,weekly:weekly?.side==='support'&&Number.isFinite(weekly.distance)&&weekly.distance>=0?25*Math.max(0,1-weekly.distance/5):0,golden:golden?.matched?10:0,rally:rally!=null&&rally>=10?5:0};
  const score=Number(Object.values(points).reduce((a,b)=>a+b,0).toFixed(2));
  return {points,score,stars:score>=80?5:score>=60?4:score>=40?3:score>=20?2:score>0?1:0};
 }
@@ -44,8 +49,8 @@ function analyze(item,daily,weekly,now=new Date()){
  const candles=completedDaily(daily.candles,market,asOf);if(candles.length<15)return null;
  const last=candles.at(-1),rsi=indicators.rsi(candles).at(-1)?.value??null;
  const weekRows=weekly?.candles?.filter(c=>c.time<=last.time)||[];
- const channel=weeklyDistance(weekRows,last.close,last.time),golden=goldenCross(candles),rally=(last.close/candles.at(-2).close-1)*100;
- return {...item,market,price:last.close,change:rally,sessionDate:last.time,rsi,weekly:channel,golden,rally,...scoreMetrics(rsi,channel,golden,rally),missing:[...(!channel?['주봉 채널 없음']:[]),...(!golden?['MA60 계산 기간 부족']:[])],dailySource:daily.source,dailyUpdated:daily.updated,weeklySource:channel?weekly.source:null,weeklyUpdated:channel?weekly.updated:null,stale:!!(daily.stale||weekly?.stale||item.stale)};
+ const levels=weeklyDistance(weekRows,last.close,last.time,'both'),channel=levels?.support??null,golden=goldenCross(candles),rally=(last.close/candles.at(-2).close-1)*100;
+ return {...item,market,price:last.close,change:rally,sessionDate:last.time,rsi,weekly:channel,weeklyNearest:levels?.nearest??null,golden,rally,...scoreMetrics(rsi,channel,golden,rally),missing:[...(!channel?['주봉 지지 후보 없음']:[]),...(!golden?['MA60 계산 기간 부족']:[])],dailySource:daily.source,dailyUpdated:daily.updated,weeklySource:levels?.nearest?weekly.source:null,weeklyUpdated:levels?.nearest?weekly.updated:null,stale:!!(daily.stale||weekly?.stale||item.stale)};
 }
 function build(root,manifest){
  const read=name=>JSON.parse(fs.readFileSync(path.join(root,name),'utf8'));
@@ -63,7 +68,7 @@ function build(root,manifest){
  rows.sort((a,b)=>b.score-a.score||a.rsi-b.rsi||(a.weekly?.distance??Infinity)-(b.weekly?.distance??Infinity)||a.tv.localeCompare(b.tv));
  rows.forEach((x,i)=>x.rank=i+1);
  const updated=[...Object.values(coverage).map(x=>x.updated),...rows.map(x=>x.dailyUpdated)].filter(Boolean).sort().at(-1)||null;
- return {rows,source:'TradingView Screener / NAVER Finance / Yahoo Finance · 실제 OHLCV 계산',updated,generatedAt:new Date().toISOString(),stale:stale||rows.some(x=>x.stale),coverage,failures,candidateCount:candidates.size,rules:RULES,method:'한국·미국 거래대금 TOP50의 주식 대상. 완료된 일봉 RSI(14) ≤30: 45~60점 · 주봉 고–고–고/저–저–저 채널의 가장 가까운 레벨, 종가 대비 5% 이내: 0~25점 · 최근 5거래일 MA20/60 골든크로스 유지: 10점 · 최근 완료 본장 종가의 전일 대비 +10% 이상: 5점. 주봉 채널 레벨 0 / 0.5 / 1 / 1.5 / 2 / 2.5 / 3. 미확인 항목은 0점이며 데이터 없음으로 표시. 별 5개 80점 이상 / 4개 60점 이상 / 3개 40점 이상 / 2개 20점 이상 / 1개 0점 초과 / 0개 신호 없음.'};
+ return {rows,source:'TradingView Screener / NAVER Finance / Yahoo Finance · 실제 OHLCV 계산',updated,generatedAt:new Date().toISOString(),stale:stale||rows.some(x=>x.stale),coverage,failures,candidateCount:candidates.size,rules:RULES,method:'한국·미국 거래대금 TOP50의 주식 대상. 완료된 일봉 RSI(14) ≤30: 45~60점 · 주봉 고–고–고/저–저–저 채널 중 종가 아래 가장 가까운 지지 후보, 종가 대비 5% 미만 (종가 위 저항은 가점 제외): 0~25점 · 최근 5거래일 MA20/60 골든크로스 유지: 10점 · 최근 완료 본장 종가의 전일 대비 +10% 이상: 5점. 주봉 채널 레벨 0 / 0.5 / 1 / 1.5 / 2 / 2.5 / 3. 미확인 항목은 0점이며 데이터 없음으로 표시. 별 5개 80점 이상 / 4개 60점 이상 / 3개 40점 이상 / 2개 20점 이상 / 1개 0점 초과 / 0개 신호 없음.'};
 }
 if(require.main===module){const root=path.resolve(process.argv[2]||'public'),manifest=JSON.parse(fs.readFileSync(path.join(root,'data-manifest.json'),'utf8'));fs.writeFileSync(path.join(root,'data-hongpicks.json'),JSON.stringify(build(root,manifest)));}
-module.exports={analyze,scoreMetrics,goldenCross,weeklyDistance,completedDaily,validCandles,build};
+module.exports={analyze,scoreMetrics,goldenCross,weeklyDistance,selectWeeklyLevels,completedDaily,validCandles,build};
