@@ -10,7 +10,7 @@ def build(output,refresh=False,cache_dir=None):
     output=Path(output);base_build(output,refresh,cache_dir)
     shutil.copy2(Path(__file__).resolve().parent/'fib-client.js',output/'fib-client.js')
     path=output/'data-manifest.json';manifest=json.loads(path.read_text(encoding='utf-8'))
-    manifest['version']='6.4.3';manifest['fibHistories']={};symbols=sorted(manifest.get('histories',{}))
+    manifest['version']='6.5.0';manifest['fibHistories']={};symbols=sorted(manifest.get('histories',{}))
     if refresh:
         with ThreadPoolExecutor(max_workers=3) as pool:
             jobs={pool.submit(p.fibonacci_history,tv):tv for tv in symbols}
@@ -41,6 +41,13 @@ def build(output,refresh=False,cache_dir=None):
         manifest.setdefault('failures',[]).append('hongpicks')
         (output/'data-hongpicks.json').write_text(json.dumps({'error':'추천 계산 데이터 없음 · 다음 수집에서 다시 시도합니다.','source':'Hong Pick'}),encoding='utf-8')
         manifest['resources']['hongpicks']='data-hongpicks.json'
+    path.write_text(json.dumps(manifest,ensure_ascii=False,separators=(',',':')),encoding='utf-8')
+    try:
+        subprocess.run(['node',str(Path(__file__).resolve().parent/'rank_codexpicks.js'),str(output)],check=True,timeout=120)
+    except (OSError,subprocess.SubprocessError):
+        manifest.setdefault('failures',[]).append('codexpicks')
+        (output/'data-codexpicks.json').write_text(json.dumps({'error':'Codex 픽 데이터 없음 · 다음 수집에서 다시 시도합니다.','source':'Hong Pick'}),encoding='utf-8')
+    manifest['resources']['codexpicks']='data-codexpicks.json'
     path.write_text(json.dumps(manifest,ensure_ascii=False,separators=(',',':')),encoding='utf-8')
     return manifest
 

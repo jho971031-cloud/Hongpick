@@ -66,4 +66,4 @@ function build(root,manifest){
  return {rows,source:'TradingView Screener / NAVER Finance / Yahoo Finance · 실제 OHLCV 계산',updated,generatedAt:new Date().toISOString(),stale:stale||rows.some(x=>x.stale),coverage,failures,candidateCount:candidates.size,rules:RULES,method:'한국·미국 거래대금 TOP50의 주식 대상. 완료된 일봉 RSI(14) ≤30: 45~60점 · 주봉 고–고–고/저–저–저 채널의 가장 가까운 레벨, 종가 대비 5% 이내: 0~25점 · 최근 5거래일 MA20/60 골든크로스 유지: 10점 · 최근 완료 본장 종가의 전일 대비 +10% 이상: 5점. 주봉 채널 레벨 0 / 0.5 / 1 / 1.5 / 2 / 2.5 / 3. 미확인 항목은 0점이며 데이터 없음으로 표시. 별 5개 80점 이상 / 4개 60점 이상 / 3개 40점 이상 / 2개 20점 이상 / 1개 0점 초과 / 0개 신호 없음.'};
 }
 if(require.main===module){const root=path.resolve(process.argv[2]||'public'),manifest=JSON.parse(fs.readFileSync(path.join(root,'data-manifest.json'),'utf8'));fs.writeFileSync(path.join(root,'data-hongpicks.json'),JSON.stringify(build(root,manifest)));}
-module.exports={analyze,scoreMetrics,goldenCross,weeklyDistance,completedDaily,build};
+module.exports={analyze,scoreMetrics,goldenCross,weeklyDistance,completedDaily,validCandles,build};

@@ -2,6 +2,48 @@ const test=require('node:test'),assert=require('node:assert/strict');
 const {scoreMetrics,completedDaily,analyze,goldenCross,build}=require('./rank_hongpicks');
 const fs=require('node:fs'),os=require('node:os'),path=require('node:path');
 const bars=prices=>prices.map((close,i)=>({time:new Date(Date.UTC(2025,0,1+i)).toISOString().slice(0,10),open:close,high:close*1.01,low:close*.99,close,volume:100}));
+const {screen:codexScreen}=require('./rank_codexpicks');
+const codexNow=new Date('2026-10-13T01:00:00Z');
+const codexDaily=prices=>({candles:bars(prices).map((c,i)=>({...c,time:new Date(Date.UTC(2026,9,12)-(prices.length-1-i)*86400000).toISOString().slice(0,10)})),source:'explicit test fixture',updated:codexNow.toISOString()});
+const codexItem={tv:'NASDAQ:TEST',market:'us',weekly:null};
+test('Codex excludes expired, stale and invalid prices instead of promoting missing data',()=>{
+ const d=codexDaily(Array.from({length:260},(_,i)=>100+i));
+ assert.throws(()=>codexScreen(codexItem,{...d,updated:'2025-01-01'},codexNow),/만료/);
+ assert.throws(()=>codexScreen(codexItem,{...d,stale:true},codexNow),/만료/);
+ assert.throws(()=>codexScreen(codexItem,{...d,candles:bars([NaN])},codexNow),/오류/);
+ assert.throws(()=>codexScreen(codexItem,{...d,candles:bars(Array(260).fill(100))},codexNow),/최근 완료 일봉 없음/);
+ assert.equal(codexScreen(codexItem,d,codexNow).signals.length,0,'overextended RSI is not a trend pick');
+});
+test('Codex breakout excludes current bar from both prior high and volume average',()=>{
+ const d=codexDaily([...Array(252).fill(100),120]);d.candles.at(-1).volume=200;
+ const x=codexScreen(codexItem,d,codexNow);
+ assert.equal(x.metrics.priorHigh,101);assert.equal(x.metrics.volumeRatio,2);
+ assert.ok(x.signals.some(s=>s.key==='breakout'));
+ d.candles.at(-1).volume=149;assert.ok(!codexScreen(codexItem,d,codexNow).signals.some(s=>s.key==='breakout'));
+ d.candles.at(-1).volume=null;assert.equal(codexScreen(codexItem,d,codexNow).metrics.volumeRatio,null);
+});
+test('Codex trend requires long term alignment and moderate RSI',()=>{
+ const d=codexDaily(Array.from({length:260},(_,i)=>100+i*.15+Math.sin(i)*2));
+ const x=codexScreen(codexItem,d,codexNow);
+ assert.ok(x.signals.some(s=>s.key==='trend'));assert.ok(x.metrics.ma20>x.metrics.ma60&&x.metrics.ma60>x.metrics.ma200);
+ const short=codexScreen(codexItem,{...d,candles:d.candles.slice(-120)},codexNow);
+ assert.ok(!short.signals.some(s=>s.key==='trend'));assert.ok(short.missing.includes('MA200 기간 부족'));
+});
+test('Codex recovery requires a real RSI recovery and a rising completed close',()=>{
+ const prices=Array.from({length:250},(_,i)=>200-i*.2);prices.push(prices.at(-1)+2);prices.push(prices.at(-1)+.4);
+ const x=codexScreen(codexItem,codexDaily(prices),codexNow);
+ assert.ok(x.signals.some(s=>s.key==='recovery'));assert.ok(x.rsi>30&&x.rsi<=50);
+ const falling=codexScreen(codexItem,codexDaily(Array.from({length:252},(_,i)=>200-i*.2)),codexNow);
+ assert.equal(falling.signals.length,0,'oversold alone cannot qualify');
+});
+test('Codex weekly support is below price, not the nearest overhead resistance',()=>{
+ const prices=Array.from({length:250},(_,i)=>200-i*.2);prices.push(prices.at(-1)+1);
+ const d=codexDaily(prices),close=prices.at(-1);
+ const x=codexScreen({...codexItem,weekly:{line:close*.99,distance:1,ratio:1}},d,codexNow);
+ assert.ok(x.signals.some(s=>s.key==='channel'));
+ assert.ok(!codexScreen({...codexItem,weekly:{line:close*1.01,distance:1,ratio:1}},d,codexNow).signals.some(s=>s.key==='channel'));
+ assert.equal(x.score,Math.max(...x.signals.map(s=>s.score)));
+});
 test('RSI oversold has more weight than all later conditions combined; missing values do not invent points',()=>{
  assert.ok(scoreMetrics(30,null,null,null).score>scoreMetrics(31,{distance:0},{matched:true},10).score);
  assert.deepEqual(scoreMetrics(null,null,null,null),{points:{rsi:0,weekly:0,golden:0,rally:0},score:0,stars:0});
