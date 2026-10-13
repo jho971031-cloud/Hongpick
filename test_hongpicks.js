@@ -15,11 +15,13 @@ test('Codex excludes expired, stale and invalid prices instead of promoting miss
  assert.equal(codexScreen(codexItem,d,codexNow).signals.length,0,'overextended RSI is not a trend pick');
 });
 test('Codex breakout excludes current bar from both prior high and volume average',()=>{
- const d=codexDaily([...Array(252).fill(100),120]);d.candles.at(-1).volume=200;
+ const d=codexDaily([...Array(252).fill(100),104]);d.candles.at(-1).volume=200;
  const x=codexScreen(codexItem,d,codexNow);
  assert.equal(x.metrics.priorHigh,101);assert.equal(x.metrics.volumeRatio,2);
  assert.ok(x.signals.some(s=>s.key==='breakout'));
- d.candles.at(-1).volume=149;assert.ok(!codexScreen(codexItem,d,codexNow).signals.some(s=>s.key==='breakout'));
+ d.candles.at(-1).volume=139;assert.ok(!codexScreen(codexItem,d,codexNow).signals.some(s=>s.key==='breakout'));
+ d.candles.at(-1).volume=200;const extended=codexDaily([...Array(252).fill(100),120]);extended.candles.at(-1).volume=200;
+ assert.ok(!codexScreen(codexItem,extended,codexNow).signals.some(s=>s.key==='breakout'),'do not chase more than 5% above the reference');
  d.candles.at(-1).volume=null;assert.equal(codexScreen(codexItem,d,codexNow).metrics.volumeRatio,null);
 });
 test('Codex trend requires long term alignment and moderate RSI',()=>{
@@ -36,13 +38,15 @@ test('Codex recovery requires a real RSI recovery and a rising completed close',
  const falling=codexScreen(codexItem,codexDaily(Array.from({length:252},(_,i)=>200-i*.2)),codexNow);
  assert.equal(falling.signals.length,0,'oversold alone cannot qualify');
 });
-test('Codex weekly support is below price, not the nearest overhead resistance',()=>{
+test('Codex channel context never creates a pick or changes scores; overhead lines remain resistance',()=>{
  const prices=Array.from({length:250},(_,i)=>200-i*.2);prices.push(prices.at(-1)+1);
  const d=codexDaily(prices),close=prices.at(-1);
  const x=codexScreen({...codexItem,weekly:{line:close*.99,distance:1,ratio:1}},d,codexNow);
- assert.ok(x.signals.some(s=>s.key==='channel'));
- assert.ok(!codexScreen({...codexItem,weekly:{line:close*1.01,distance:1,ratio:1}},d,codexNow).signals.some(s=>s.key==='channel'));
- assert.equal(x.score,Math.max(...x.signals.map(s=>s.score)));
+ const base=codexScreen(codexItem,d,codexNow),overhead=codexScreen({...codexItem,weekly:{line:close*1.01,distance:1,ratio:1}},d,codexNow);
+ assert.equal(x.channelContext.state,'supportCandidate');assert.equal(overhead.channelContext.state,'resistance');
+ assert.deepEqual(x.signals,base.signals);assert.equal(x.score,base.score);assert.equal(overhead.score,base.score);
+ const trendDaily=codexDaily(Array.from({length:260},(_,i)=>100+i*.15+Math.sin(i)*2));
+ assert.equal(codexScreen({...codexItem,weekly:{line:100,distance:1}},trendDaily,codexNow).score,codexScreen(codexItem,trendDaily,codexNow).score);
 });
 test('RSI oversold has more weight than all later conditions combined; missing values do not invent points',()=>{
  assert.ok(scoreMetrics(30,null,null,null).score>scoreMetrics(31,{distance:0},{matched:true},10).score);
