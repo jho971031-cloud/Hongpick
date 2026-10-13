@@ -7,7 +7,7 @@ import providers as p
 import disclosures as d
 
 BASE=Path(__file__).resolve().parent
-ASSETS=('index.html','style.css','app.js','data-client.js','charts.js','live-data.js','lightweight-charts.js','LICENSE-lightweight-charts.txt','manifest.json','responsive-check.html')
+ASSETS=('index.html','style.css','app.js','data-client.js','charts.js','scenario.js','live-data.js','lightweight-charts.js','LICENSE-lightweight-charts.txt','manifest.json','responsive-check.html')
 
 def read(name):return json.loads((BASE/name).read_text())
 
