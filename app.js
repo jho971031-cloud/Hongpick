@@ -21,19 +21,49 @@ function ensureCharts(){if(!chartScripts)chartScripts=(async()=>{for(const name 
 function notice(root,text){root.innerHTML='<div class="empty">'+escapeHtml(text)+'</div>'}
 function source(d){return `${d.source||''}${d.kind||/13F|OGE|CNN|Fear|Alternative/.test(d.source||'')?'':' · 지연·주기 수집'} · 기준시각 ${formatDate(d.updated)}${d.stale?' · 이전 데이터':''}`}
 const pages=['menu','hongpicks','codexpicks','home','search','coins','gurus','turnover','fng','trump','watchlist'];
-function show(id,updateHash=true){
- if(!pages.includes(id))id='home';state.page=id;
+const pageScrolls=new Map();let scrollSaveFrame=null,scrollRestore=null,navigationSerial=0;
+history.scrollRestoration='manual';
+function rememberPageScroll(){
+ if(scrollRestore)return;const y=window.scrollY;pageScrolls.set(state.page,y);
+ const old=history.state||{},nav=old.hongNavigation;
+ if(nav?.page===state.page)history.replaceState({...old,hongNavigation:{...nav,y}},'');
+}
+function cancelScrollRestore(){if(!scrollRestore)return;scrollRestore.observer?.disconnect();scrollRestore=null;rememberPageScroll()}
+for(const event of ['wheel','touchstart','pointerdown','keydown'])window.addEventListener(event,cancelScrollRestore,{passive:true});
+window.addEventListener('scroll',()=>{
+ if(scrollRestore||scrollSaveFrame!==null)return;
+ const key=history.state?.hongNavigation?.key,page=state.page;
+ scrollSaveFrame=requestAnimationFrame(()=>{scrollSaveFrame=null;if(key===history.state?.hongNavigation?.key&&page===state.page)rememberPageScroll()});
+},{passive:true});
+function restorePageScroll(y,tasks){
+ const target={page:state.page,y:Math.max(0,Number(y)||0)};scrollRestore=target;
+ const apply=()=>{if(scrollRestore===target&&state.page===target.page)window.scrollTo({top:target.y,left:0,behavior:'instant'})};
+ if(window.ResizeObserver){target.observer=new ResizeObserver(apply);target.observer.observe($(target.page))}
+ requestAnimationFrame(apply);
+ Promise.allSettled(tasks).then(()=>requestAnimationFrame(()=>{apply();requestAnimationFrame(()=>{if(scrollRestore===target){target.observer?.disconnect();scrollRestore=null;rememberPageScroll()}})}));
+}
+function show(id,updateHash=true,restore=false){
+ if(!pages.includes(id))id='home';
+ if(updateHash)rememberPageScroll();
+ if(scrollSaveFrame!==null){cancelAnimationFrame(scrollSaveFrame);scrollSaveFrame=null}
+ scrollRestore?.observer?.disconnect();scrollRestore=null;
+ const saved=history.state?.hongNavigation,restoreY=restore?(saved?.page===id?saved.y:pageScrolls.get(id)||0):0;
+ state.page=id;const tasks=[];
  document.querySelectorAll('.page').forEach(p=>p.classList.toggle('active',p.id===id));
  document.querySelectorAll('header [data-go]').forEach(b=>{b.classList.toggle('active',b.dataset.go===id);b.setAttribute('aria-current',b.dataset.go===id?'page':'false')});
- window.scrollTo(0,0);if(updateHash&&location.hash!=='#'+id)history.pushState(null,'','#'+id);
- if(id==='watchlist')renderWatch();if(id==='turnover')loadTurnover();if(id==='gurus')loadGurus();if(id==='trump'&&!state.trump)loadTrump();if(id==='fng')loadFng();
- if(id==='coins'){loadCoins();if(coinSelected&&!charts.coins)openCoin(coinSelected)}
- if(id==='home'){loadOverview();loadFng();loadGurus();loadPicks();loadCodexPicks()}if(id==='hongpicks')loadPicks();if(id==='codexpicks')loadCodexPicks();
- if(id==='search'&&!charts.search)renderChart(state.search||{tv:'NASDAQ:NVDA',symbol:'NASDAQ:NVDA',name:'NVIDIA',ticker:'NVDA'},'search');
- if(id==='search')loadChartPicks();
+ if(updateHash&&location.hash!=='#'+id)history.pushState({hongNavigation:{page:id,y:0,key:Date.now()+':'+(++navigationSerial)}},'','#'+id);
+ else if(history.state?.hongNavigation?.page!==id)history.replaceState({...history.state,hongNavigation:{page:id,y:restoreY,key:Date.now()+':'+(++navigationSerial)}},'');
+ if(!restore)window.scrollTo({top:0,left:0,behavior:'instant'});
+ if(id==='watchlist')tasks.push(renderWatch());if(id==='turnover')tasks.push(loadTurnover());if(id==='gurus')tasks.push(loadGurus());if(id==='trump'&&!state.trump)tasks.push(loadTrump());if(id==='fng')tasks.push(loadFng());
+ if(id==='coins'){tasks.push(loadCoins());if(coinSelected&&!charts.coins)tasks.push(openCoin(coinSelected))}
+ if(id==='home')tasks.push(loadOverview(),loadFng(),loadGurus(),loadPicks(),loadCodexPicks());if(id==='hongpicks')tasks.push(loadPicks());if(id==='codexpicks')tasks.push(loadCodexPicks());
+ if(id==='search'&&!charts.search)tasks.push(renderChart(state.search||{tv:'NASDAQ:NVDA',symbol:'NASDAQ:NVDA',name:'NVIDIA',ticker:'NVDA'},'search'));
+ if(id==='search')tasks.push(loadChartPicks());
+ if(restore)restorePageScroll(restoreY,tasks);
  requestAnimationFrame(()=>{Object.values(charts).forEach(x=>{x.resize();if(x.item?.tv.startsWith('BINANCE:')){if(id==='coins')x.startLive();else x.stopLive()}});syncLiveQuotes()});
 }
-window.addEventListener('hashchange',()=>{const id=location.hash.slice(1)||'home';if(id!==state.page)show(id,false)});
+window.addEventListener('popstate',()=>show(location.hash.slice(1)||'home',false,true));
+window.addEventListener('hashchange',()=>{const id=location.hash.slice(1)||'home';if(id!==state.page)show(id,false,true)});
 async function renderChart(item,mode='search'){if(!item?.tv)return;const searchMode=mode==='search',key=searchMode?'search':'current';state[key]=item;$(searchMode?'searchTitle':'chartTitle').textContent=item.name||item.ticker||item.symbol;$(searchMode?'searchSub':'turnChartSub').textContent=item.tv;const target=$(searchMode?'searchChart':'chart'),controls=$(searchMode?'searchIndicators':'turnIndicators');if(searchMode){loadDetails(item);renderChartPicks()}try{await ensureCharts();if(state[key]?.tv!==item.tv)return;if(!charts[mode])charts[mode]=new HongChart(target,controls);charts[mode].load(item)}catch(e){notice(target,e.message)}}
 function openStock(item){if(item?.type==='crypto'||/^(BINANCE|CRYPTO):/.test(item?.tv||'')){show('coins');openCoin(item);return}state.search=item;const ready=!!charts.search;show('search');if(ready)renderChart(item,'search');renderChartPicks()}
 async function loadCoins(){
@@ -111,7 +141,7 @@ document.addEventListener('click',e=>{const wm=e.target.closest('[data-watch-mar
 $('trumpSearch').oninput=e=>{state.trumpQuery=e.target.value.trim().toLowerCase();if(state.trump)renderTrump()};
 $('coinSearchBtn').onclick=searchCoins;$('coinSearchInput').onkeydown=e=>{if(e.key==='Enter')searchCoins()};$('coinLimit').onchange=renderCoins;
 $('searchBtn').onclick=search;$('searchInput').onkeydown=e=>{if(e.key==='Enter')search()};$('refresh').onclick=()=>{HongData.clear();if(state.page==='coins'){loadCoins();if(coinSelected)openCoin(coinSelected)}else if(state.page==='hongpicks')loadPicks();else if(state.page==='codexpicks')loadCodexPicks();else if(state.page==='turnover')loadTurnover();else if(state.page==='gurus')loadGurus();else if(state.page==='trump')loadTrump();else if(state.page==='search'&&state.search)renderChart(state.search,'search');else if(state.page==='watchlist')renderWatch();else{loadOverview();loadFng();if(state.page==='home'){loadGurus();loadPicks();loadCodexPicks()}}};
-$('status').textContent=HongData.staticMode?'● 주기 수집 · 실제 데이터':'● 공개 제공원 · 지연 시세';if(HongData.staticMode){$('dataMode').hidden=false;$('apiFallback').checked=HongData.fallback;$('apiFallback').onchange=e=>{HongData.setFallback(e.target.checked);$('dataModeStatus').textContent=HongData.fallback?'· API 보완 켜짐':'· Render 요청 없음'};$('dataModeStatus').textContent=HongData.fallback?'· API 보완 켜짐':'· Render 요청 없음'}const initial=location.hash.slice(1);show(pages.includes(initial)?initial:'home',false);setInterval(()=>{if(document.hidden)return;if(state.page==='coins')loadCoins();if(state.page==='turnover')loadTurnover();if(state.page==='watchlist')renderWatch();if(state.page==='home'){loadOverview();loadPicks();loadCodexPicks()}if(state.page==='hongpicks')loadPicks();if(state.page==='codexpicks')loadCodexPicks();if(state.page==='search'&&state.search)loadDetails(state.search)},HongData.staticMode?300000:90000);setInterval(()=>{if(!document.hidden&&['home','fng'].includes(state.page))loadFng()},1800000);setInterval(()=>{if(!document.hidden&&state.page==='gurus')loadGurus()},21600000);setInterval(()=>{if(!document.hidden&&state.page==='trump')loadTrump()},3600000);
+$('status').textContent=HongData.staticMode?'● 주기 수집 · 실제 데이터':'● 공개 제공원 · 지연 시세';if(HongData.staticMode){$('dataMode').hidden=false;$('apiFallback').checked=HongData.fallback;$('apiFallback').onchange=e=>{HongData.setFallback(e.target.checked);$('dataModeStatus').textContent=HongData.fallback?'· API 보완 켜짐':'· Render 요청 없음'};$('dataModeStatus').textContent=HongData.fallback?'· API 보완 켜짐':'· Render 요청 없음'}const initial=location.hash.slice(1);show(pages.includes(initial)?initial:'home',false,true);setInterval(()=>{if(document.hidden)return;if(state.page==='coins')loadCoins();if(state.page==='turnover')loadTurnover();if(state.page==='watchlist')renderWatch();if(state.page==='home'){loadOverview();loadPicks();loadCodexPicks()}if(state.page==='hongpicks')loadPicks();if(state.page==='codexpicks')loadCodexPicks();if(state.page==='search'&&state.search)loadDetails(state.search)},HongData.staticMode?300000:90000);setInterval(()=>{if(!document.hidden&&['home','fng'].includes(state.page))loadFng()},1800000);setInterval(()=>{if(!document.hidden&&state.page==='gurus')loadGurus()},21600000);setInterval(()=>{if(!document.hidden&&state.page==='trump')loadTrump()},3600000);
 
 
 
