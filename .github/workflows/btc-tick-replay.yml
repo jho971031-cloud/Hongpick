@@ -41,13 +41,13 @@ jobs:
           const levels=(c,t)=>ratios.map(r=>c.origin*Math.exp(c.slope*(t-c.epoch)/900+r*c.width)).sort((a,b)=>a-b);
           const FEE=.0005,MMR=.004;
           let cash=1000,pos=null,pending=null,previous=null,totalTicks=0,firstTick=null,lastTick=null;
-          let minHeadroom=Infinity,maxDD=0,peak=1000,minuteKey=null,ohlc=null,mismatches=0,checkedMinutes=0,ambiguousLiquidation=false;
+          let minHeadroom=Infinity,maxDD=0,peak=1000,minuteKey=null,ohlc=null,mismatches=0,checkedMinutes=0,ambiguousLiquidation=false,idGapCount=0,unusedIdCount=0;
           const events=[],trades=[],curve=[],audit=[],minutesMap=new Map(mins.map(x=>[x.time,x])),markMap=new Map(marks.map(x=>[x.time,x]));
           const record=(obj)=>{events.push(obj);audit.push({event:obj,previousTick:previous});};
           function finishMinute(){
            if(!ohlc)return;
            const expected=minutesMap.get(minuteKey);checkedMinutes++;
-           if(!expected||['open','high','low','close'].some(k=>Math.abs(expected[k]-ohlc[k])>1e-6))mismatches++;
+           if(!expected||(['open','high','low','close'].some(k=>Math.abs(expected[k]-ohlc[k])>1e-6)||Math.abs(expected.volume-ohlc.volume)>1e-5))mismatches++;
           }
           function fill(tick){
            const order=pending;pending=null;
@@ -67,11 +67,12 @@ jobs:
           }
           function onTick(tick){
            if(tick.time<START||tick.time>=END)return;
-           if(previous&&(tick.id!==previous.id+1||tick.time<previous.time))throw Error('Raw trade order diagnostic '+JSON.stringify({previous,current:tick,idDelta:tick.id-previous.id,timeDelta:tick.time-previous.time}));
+           if(previous&&(tick.id<=previous.id||tick.time<previous.time))throw Error('Raw trade order diagnostic '+JSON.stringify({previous,current:tick,idDelta:tick.id-previous.id,timeDelta:tick.time-previous.time}));
+           if(previous&&tick.id>previous.id+1){idGapCount++;unusedIdCount+=tick.id-previous.id-1;}
            totalTicks++;if(!firstTick)firstTick=tick;lastTick=tick;
            const minute=Math.floor(tick.time/60)*60;
-           if(minute!==minuteKey){finishMinute();minuteKey=minute;ohlc={open:tick.price,high:tick.price,low:tick.price,close:tick.price};}
-           else {ohlc.high=Math.max(ohlc.high,tick.price);ohlc.low=Math.min(ohlc.low,tick.price);ohlc.close=tick.price;}
+           if(minute!==minuteKey){finishMinute();minuteKey=minute;ohlc={open:tick.price,high:tick.price,low:tick.price,close:tick.price,volume:tick.qty};}
+           else {ohlc.high=Math.max(ohlc.high,tick.price);ohlc.low=Math.min(ohlc.low,tick.price);ohlc.close=tick.price;ohlc.volume+=tick.qty;}
            let justFilled=false;
            if(pending){fill(tick);justFilled=true;}
            if(pos){
@@ -101,7 +102,7 @@ jobs:
            previous=tick;
           }
           const stream=readline.createInterface({input:process.stdin,crlfDelay:Infinity});
-          stream.on('line',line=>{const [id,time,price]=line.split(',');onTick({id:Number(id),time:Number(time)/1000,price:Number(price)});});
+          stream.on('line',line=>{const [id,time,price,qty]=line.split(',');onTick({id:Number(id),time:Number(time)/1000,price:Number(price),qty:Number(qty)});});
           stream.on('close',()=>{
            finishMinute();const markPrice=marks.at(-1).close;
            const openPosition=pos?{side:pos.side===1?'LONG':'SHORT',entryTime:pos.time,legs:pos.legs,margin:pos.margin,averagePrice:pos.cost/pos.qty,markPrice,unrealized:pos.side*(pos.qty*markPrice-pos.cost),entryFees:pos.fees}:null;
@@ -110,7 +111,7 @@ jobs:
            if(Math.abs(ledger-final)>1e-6)throw Error('Ledger does not reconcile');
            if(checkedMinutes!==10080||mismatches)throw Error('Raw trade OHLC does not match all requested minutes: '+checkedMinutes+' mismatches '+mismatches);
            if(ambiguousLiquidation)throw Error('Mark-price bounds permit liquidation; higher-resolution mark data required. Do not report final return.');
-           const summary={initial:1000,final,returnPct:(final/1000-1)*100,closedTrades:trades.length,wins:trades.filter(t=>t.pnl>1e-6).length,losses:trades.filter(t=>t.pnl< -1e-6).length,breakevens:trades.filter(t=>Math.abs(t.pnl)<=1e-6).length,liquidationsRuledOut:true,minMaintenanceHeadroom:minHeadroom,maxTradePriceDrawdownPct:maxDD*100,totalTicks,checkedMinutes,ohlcMismatches:mismatches,firstTick,lastTick,fees:trades.reduce((s,t)=>s+t.fees,0)+(openPosition?.entryFees||0)};
+           const summary={initial:1000,final,returnPct:(final/1000-1)*100,closedTrades:trades.length,wins:trades.filter(t=>t.pnl>1e-6).length,losses:trades.filter(t=>t.pnl< -1e-6).length,breakevens:trades.filter(t=>Math.abs(t.pnl)<=1e-6).length,liquidationsRuledOut:true,minMaintenanceHeadroom:minHeadroom,maxTradePriceDrawdownPct:maxDD*100,totalTicks,idGapCount,unusedIdCount,checkedMinutes,ohlcMismatches:mismatches,firstTick,lastTick,fees:trades.reduce((s,t)=>s+t.fees,0)+(openPosition?.entryFees||0)};
            const result={summary,openPosition,trades,events,audit,curve,assumptions:{execution:'Signal on observed raw trade; market fill on next recorded raw trade. Hypothetical fills, zero latency beyond next tick and no order-book impact.',signal:'Previous completed 15m Wilder RSI14, original Hong Pick high/low channel; anchors frozen at entry.',margin:'Cross; 100x; 10% initially plus one equal 10% average; no stop.',exit:'First fill gross initial-margin ROI +50%; after average fee-inclusive breakeven.',fees:'0.05% taker each fill; funding and slippage/order-book effects excluded.',mark:'1m actual mark low/high audit bounds rule out liquidation throughout the replay; no fabricated intra-minute mark path.'}};
            fs.writeFileSync(out+'result.json',JSON.stringify(result,null,2));console.log('TICK_REPLAY_RESULT '+JSON.stringify(summary));
           });
@@ -143,7 +144,7 @@ jobs:
                # Raw USDT futures trades: id, price, qty, quote_qty, time, is_buyer_maker.
                stamp=int(row[4]);stamp=stamp//1000 if stamp>10**14 else stamp
                if 1790780400000<=stamp<1791385200000:
-                proc.stdin.write(f'{row[0]},{stamp},{row[1]}\n');count+=1
+                proc.stdin.write(f'{row[0]},{stamp},{row[1]},{row[2]}\n');count+=1
             sources.append({'day':str(day),'url':url,'sha256':sha,'zip_bytes':len(data),'selected_trades':count})
             (out/'raw-sources.json').write_text(json.dumps(sources,indent=2))
             print('Processed',day,count,'trades',len(data),'ZIP bytes',flush=True)
