@@ -1,0 +1,165 @@
+name: Replay BTC raw trades October 1-7
+on:
+  push:
+    branches: [codex/btc-october-backtest]
+    paths: [.github/workflows/btc-tick-replay.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v4
+        with:
+          name: btc-october-1-7-data
+          run-id: 39224909453
+          github-token: ${{ github.token }}
+          path: tick-input
+      - name: Prepare sequential replay
+        run: |
+          cat > tick-replay.cjs <<'JSREPLAY'
+          const fs=require('fs'),vm=require('vm'),readline=require('readline');
+          const input='tick-input/',out='tick-output/';fs.mkdirSync(out,{recursive:true});
+          const read=n=>JSON.parse(fs.readFileSync(input+n+'.json'));
+          const manifest=read('manifest'),bars=read('futures-15m'),mins=read('futures-1m'),marks=read('mark-1m');
+          const START=Date.parse(manifest.start_utc)/1000,END=Date.parse(manifest.end_utc_exclusive)/1000;
+          const box={window:{}};vm.createContext(box);vm.runInContext(fs.readFileSync(input+'charts-source.js','utf8'),box);
+          const I=box.window.HongIndicators,rsis=new Map(I.rsi(bars).map(r=>[r.time,r.value])),signals=new Map();
+          for(let i=288;i<bars.length;i++){
+           const history=bars.slice(0,i),rsi=rsis.get(history.at(-1).time);
+           if(rsi>30&&rsi<70)continue;
+           signals.set(bars[i].time,{rsi,channels:['high','low'].map(m=>I.intradayFibonacci(history,m)).filter(Boolean).map(c=>{
+            const [a,b,d]=c.anchors,slope=Math.log(b.price/a.price)/((b.time-a.time)/900);
+            return {...c,origin:a.price,epoch:a.time,slope,width:Math.log(d.price/a.price)-slope*(d.time-a.time)/900};
+           })});
+          }
+          const ratios=[0,.5,1,1.5,2,2.5,3];
+          const levels=(c,t)=>ratios.map(r=>c.origin*Math.exp(c.slope*(t-c.epoch)/900+r*c.width)).sort((a,b)=>a-b);
+          const FEE=.0005,MMR=.004;
+          let cash=1000,pos=null,pending=null,previous=null,totalTicks=0,firstTick=null,lastTick=null;
+          let minHeadroom=Infinity,maxDD=0,peak=1000,minuteKey=null,ohlc=null,mismatches=0,checkedMinutes=0,ambiguousLiquidation=false;
+          const events=[],trades=[],curve=[],audit=[],minutesMap=new Map(mins.map(x=>[x.time,x])),markMap=new Map(marks.map(x=>[x.time,x]));
+          const record=(obj)=>{events.push(obj);audit.push({event:obj,previousTick:previous});};
+          function finishMinute(){
+           if(!ohlc)return;
+           const expected=minutesMap.get(minuteKey);checkedMinutes++;
+           if(!expected||['open','high','low','close'].some(k=>Math.abs(expected[k]-ohlc[k])>1e-6))mismatches++;
+          }
+          function fill(tick){
+           const order=pending;pending=null;
+           if(order.type==='entry')pos={side:order.side,channel:order.channel,k:order.k,legMargin:cash*.1,startEquity:cash,margin:0,cost:0,qty:0,fees:0,legs:0,time:tick.time,rsi:order.rsi,firstPrice:tick.price};
+           if(order.type==='entry'||order.type==='average'){
+            const margin=pos.legMargin,notional=margin*100,existingPnl=pos.side*(pos.qty*tick.price-pos.cost);
+            if(cash+existingPnl<margin+notional*FEE){record({...tick,action:'order-rejected',type:order.type});if(!pos.legs)pos=null;else pos.averageBlocked=true;return;}
+            const qty=notional/tick.price;cash-=margin+notional*FEE;pos.margin+=margin;pos.cost+=notional;pos.qty+=qty;pos.fees+=notional*FEE;pos.legs++;
+            if(order.type==='average')pos.k=order.k;
+            record({...tick,action:order.type,side:pos.side,legs:pos.legs,qty,margin,trigger:order.trigger});
+           }else {
+            const gross=pos.side*(pos.qty*tick.price-pos.cost),exitFee=pos.qty*tick.price*FEE,net=gross-exitFee-pos.fees;
+            cash+=pos.margin+gross-exitFee;
+            trades.push({side:pos.side===1?'LONG':'SHORT',entryTime:pos.time,exitTime:tick.time,entryPrice:pos.firstPrice,averagePrice:pos.cost/pos.qty,exitPrice:tick.price,exitTradeId:tick.id,legs:pos.legs,margin:pos.margin,pnl:net,fees:pos.fees+exitFee,reason:pos.legs===1?'roi50':'fee-inclusive-breakeven',balance:cash,trigger:order.trigger,anchors:pos.channel.anchors});
+            record({...tick,action:'exit',legs:pos.legs,net,trigger:order.trigger});pos=null;
+           }
+          }
+          function onTick(tick){
+           if(tick.time<START||tick.time>=END)return;
+           if(previous&&(tick.id!==previous.id+1||tick.time<previous.time))throw Error('Raw trade ID or time order discontinuity at '+tick.id);
+           totalTicks++;if(!firstTick)firstTick=tick;lastTick=tick;
+           const minute=Math.floor(tick.time/60)*60;
+           if(minute!==minuteKey){finishMinute();minuteKey=minute;ohlc={open:tick.price,high:tick.price,low:tick.price,close:tick.price};}
+           else {ohlc.high=Math.max(ohlc.high,tick.price);ohlc.low=Math.min(ohlc.low,tick.price);ohlc.close=tick.price;}
+           let justFilled=false;
+           if(pending){fill(tick);justFilled=true;}
+           if(pos){
+            const mark=markMap.get(minute);if(!mark)throw Error('No mark bound');
+            // Bounds are audit-only. Future minute extrema never select entries/exits.
+            const worst=pos.side===1?mark.low:mark.high,headroom=cash+pos.margin+pos.side*(pos.qty*worst-pos.cost)-pos.qty*worst*MMR;
+            minHeadroom=Math.min(minHeadroom,headroom);if(headroom<=0)ambiguousLiquidation=true;
+            const equity=cash+pos.margin+pos.side*(pos.qty*tick.price-pos.cost);peak=Math.max(peak,equity);maxDD=Math.max(maxDD,(peak-equity)/peak);
+            if(!justFilled){
+             const target=pos.legs===1?(pos.cost+pos.side*.5*pos.margin)/pos.qty:(pos.side===1?(pos.cost+pos.fees)/(pos.qty*(1-FEE)):(pos.cost-pos.fees)/(pos.qty*(1+FEE)));
+             if(pos.side===1?tick.price>=target:tick.price<=target)pending={type:'exit',trigger:tick,target};
+             else if(pos.legs<2&&!pos.averageBlocked){
+              const k=pos.k-pos.side;if(k>=0&&k<7){const price=levels(pos.channel,tick.time)[k];
+               if(pos.side===1?tick.price<=price:tick.price>=price)pending={type:'average',k,trigger:tick};}
+             }
+            }
+           }else if(!justFilled&&previous){
+            const sig=signals.get(Math.floor(tick.time/900)*900);
+            if(sig){const side=sig.rsi<=30?1:-1,candidates=[];
+             for(const channel of sig.channels){const now=levels(channel,tick.time),before=levels(channel,Math.max(previous.time,Math.floor(tick.time/900)*900));
+              for(let k=0;k<7;k++)if(side===1?(previous.price>before[k]&&tick.price<=now[k]):(previous.price<before[k]&&tick.price>=now[k]))candidates.push({channel,k});}
+             candidates.sort((a,b)=>b.channel.score-a.channel.score);
+             if(candidates.length)pending={type:'entry',side,...candidates[0],rsi:sig.rsi,trigger:tick};
+            }
+           }
+           if(totalTicks%100000===0)curve.push({time:tick.time,equity:cash+(pos?pos.margin+pos.side*(pos.qty*tick.price-pos.cost):0)});
+           previous=tick;
+          }
+          const stream=readline.createInterface({input:process.stdin,crlfDelay:Infinity});
+          stream.on('line',line=>{const [id,time,price]=line.split(',');onTick({id:Number(id),time:Number(time)/1000,price:Number(price)});});
+          stream.on('close',()=>{
+           finishMinute();const markPrice=marks.at(-1).close;
+           const openPosition=pos?{side:pos.side===1?'LONG':'SHORT',entryTime:pos.time,legs:pos.legs,margin:pos.margin,averagePrice:pos.cost/pos.qty,markPrice,unrealized:pos.side*(pos.qty*markPrice-pos.cost),entryFees:pos.fees}:null;
+           const final=cash+(openPosition?openPosition.margin+openPosition.unrealized:0);
+           const ledger=1000+trades.reduce((s,t)=>s+t.pnl,0)+(openPosition?openPosition.unrealized-openPosition.entryFees:0);
+           if(Math.abs(ledger-final)>1e-6)throw Error('Ledger does not reconcile');
+           if(checkedMinutes!==10080||mismatches)throw Error('Raw trade OHLC does not match all requested minutes: '+checkedMinutes+' mismatches '+mismatches);
+           if(ambiguousLiquidation)throw Error('Mark-price bounds permit liquidation; higher-resolution mark data required. Do not report final return.');
+           const summary={initial:1000,final,returnPct:(final/1000-1)*100,closedTrades:trades.length,wins:trades.filter(t=>t.pnl>1e-6).length,losses:trades.filter(t=>t.pnl< -1e-6).length,breakevens:trades.filter(t=>Math.abs(t.pnl)<=1e-6).length,liquidationsRuledOut:true,minMaintenanceHeadroom:minHeadroom,maxTradePriceDrawdownPct:maxDD*100,totalTicks,checkedMinutes,ohlcMismatches:mismatches,firstTick,lastTick,fees:trades.reduce((s,t)=>s+t.fees,0)+(openPosition?.entryFees||0)};
+           const result={summary,openPosition,trades,events,audit,curve,assumptions:{execution:'Signal on observed raw trade; market fill on next recorded raw trade. Hypothetical fills, zero latency beyond next tick and no order-book impact.',signal:'Previous completed 15m Wilder RSI14, original Hong Pick high/low channel; anchors frozen at entry.',margin:'Cross; 100x; 10% initially plus one equal 10% average; no stop.',exit:'First fill gross initial-margin ROI +50%; after average fee-inclusive breakeven.',fees:'0.05% taker each fill; funding and slippage/order-book effects excluded.',mark:'1m actual mark low/high audit bounds rule out liquidation throughout the replay; no fabricated intra-minute mark path.'}};
+           fs.writeFileSync(out+'result.json',JSON.stringify(result,null,2));console.log('TICK_REPLAY_RESULT '+JSON.stringify(summary));
+          });
+          JSREPLAY
+          cat > replay-raw.py <<'PYREPLAY'
+          import csv,datetime as dt,hashlib,io,json,pathlib,subprocess,urllib.request,zipfile,time
+          out=pathlib.Path('tick-output');out.mkdir(exist_ok=True)
+          sources=[]
+          def fetch(url):
+           for attempt in range(3):
+            try:
+             with urllib.request.urlopen(url,timeout=120) as r:return r.read()
+            except Exception:
+             if attempt==2:raise
+             time.sleep(2)
+          proc=subprocess.Popen(['node','tick-replay.cjs'],stdin=subprocess.PIPE,text=True,bufsize=1024*1024)
+          try:
+           for i in range(8):
+            day=dt.date(2026,9,30)+dt.timedelta(days=i)
+            url=f'https://data.binance.vision/data/futures/um/daily/trades/BTCUSDT/BTCUSDT-trades-{day}.zip'
+            print('Downloading raw trades',day,flush=True)
+            data=fetch(url);sha=hashlib.sha256(data).hexdigest();expected=fetch(url+'.CHECKSUM').decode().split()[0]
+            assert sha==expected,'SHA256 mismatch'
+            count=0
+            with zipfile.ZipFile(io.BytesIO(data)) as z:
+             names=[n for n in z.namelist() if n.endswith('.csv')];assert len(names)==1
+             with z.open(names[0]) as f:
+              for row in csv.reader(io.TextIOWrapper(f)):
+               if not row or not row[0].isdigit():continue
+               # Raw USDT futures trades: id, price, qty, quote_qty, time, is_buyer_maker.
+               stamp=int(row[4]);stamp=stamp//1000 if stamp>10**14 else stamp
+               if 1790780400000<=stamp<1791385200000:
+                proc.stdin.write(f'{row[0]},{stamp},{row[1]}\n');count+=1
+            sources.append({'day':str(day),'url':url,'sha256':sha,'zip_bytes':len(data),'selected_trades':count})
+            (out/'raw-sources.json').write_text(json.dumps(sources,indent=2))
+            print('Processed',day,count,'trades',len(data),'ZIP bytes',flush=True)
+            del data
+           proc.stdin.close();code=proc.wait();assert code==0,f'Replay exited {code}'
+          except BaseException:
+           proc.kill();proc.wait();raise
+          PYREPLAY
+      - name: Download verified raw trades and replay in exchange order
+        run: python replay-raw.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: btc-october-raw-replay
+          path: |
+            tick-output/
+            tick-replay.cjs
+            replay-raw.py
+          retention-days: 30
