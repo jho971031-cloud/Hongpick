@@ -53,7 +53,10 @@ jobs:
            {id:'stopAccount3pct',tp:.5,avg:true,stop:.3},
            {id:'stopAccount5pct',tp:.5,avg:true,stop:.5},
            {id:'half25rest50',tp:.5,avg:false,partial:.25},
-           {id:'maxHold4h',tp:.5,avg:true,maxSeconds:14400}
+           {id:'maxHold4h',tp:.5,avg:true,maxSeconds:14400},
+           {id:'tp100Risk3',tp:1,avg:true,stop:.3},
+           {id:'half50rest100',tp:1,avg:true,partial:.5},
+           {id:'lock25After50',tp:1,avg:true,protect:.5,protectedFloor:.25}
           ];
           const states=configs.map(cfg=>({cfg,cash:1000,pos:null,pending:null,trades:[],events:[],curve:[],peak:1000,mdd:0,minimumMaintenanceHeadroom:Infinity,markAmbiguous:false}));
           const diagnostics=plan.map((e,i)=>({index:i+1,side:e.side,entryTime:e.time,entryPrice:e.price,margin:e.margin,maxGrossROI:-Infinity,minGrossROI:Infinity,timeToMax:null,timeToMin:null,maxBeforeBaselineExit:-Infinity,minBeforeBaselineExit:Infinity}));
@@ -103,14 +106,14 @@ jobs:
             if(s.pending&&s.pos){const order=s.pending;s.pending=null;if(order.type==='average')add(s,t,s.pos.plan,order.k);else exit(s,t,order.type,order.type==='partial'?.5:1);continue;}
             const p=s.pos;if(!p)continue;
             const grossROI=p.side*(t.price/p.entryPrice-1)*100;
-            if(s.cfg.protect&&grossROI>=s.cfg.protect)p.protected=true;
+            if(p.legs===1&&s.cfg.protect&&grossROI>=s.cfg.protect)p.protected=true;
             if(s.cfg.stop&&netAt(p,t.price)<=-s.cfg.stop*p.initialMargin){s.pending={type:'risk-stop'};continue;}
             if(s.cfg.maxSeconds&&t.time-p.time>=s.cfg.maxSeconds){s.pending={type:'time-exit'};continue;}
             if(p.legs>=2&&netAt(p,t.price)>=0){s.pending={type:'fee-breakeven'};continue;}
             if(p.legs===1&&grossROI>=s.cfg.tp){s.pending={type:'take-profit'};continue;}
             if(p.legs===1&&s.cfg.partial&&!p.partialDone&&grossROI>=s.cfg.partial){p.partialDone=true;s.pending={type:'partial'};continue;}
-            if(p.protected&&netAt(p,t.price)<=0){s.pending={type:'protected-breakeven'};continue;}
-            if(s.cfg.avg&&p.legs<2&&!p.averageBlocked&&!p.protected){const k=p.k-p.side;if(k>=0&&k<7){const a=p.plan.channel[0],r=p.plan.width>=0?k*.5:3-k*.5,l=a.price*Math.exp(p.plan.slope*(t.time-a.time)/900+r*p.plan.width);if(p.side===1?t.price<=l:t.price>=l)s.pending={type:'average',k};}}
+            if(p.protected&&netAt(p,t.price)<=(s.cfg.protectedFloor||0)*p.initialMargin){s.pending={type:s.cfg.protectedFloor?'profit-lock':'protected-breakeven'};continue;}
+            if(s.cfg.avg&&p.legs<2&&!p.averageBlocked&&!p.protected&&!p.partialDone){const k=p.k-p.side;if(k>=0&&k<7){const a=p.plan.channel[0],r=p.plan.width>=0?k*.5:3-k*.5,l=a.price*Math.exp(p.plan.slope*(t.time-a.time)/900+r*p.plan.width);if(p.side===1?t.price<=l:t.price>=l)s.pending={type:'average',k};}}
            }
            if(at){const d=diagnostics[at-1],e=plan[at-1],roi=e.side*(t.price/e.price-1)*100;
             if(roi>d.maxGrossROI){d.maxGrossROI=roi;d.timeToMax=t.time-e.time;}if(roi<d.minGrossROI){d.minGrossROI=roi;d.timeToMin=t.time-e.time;}
