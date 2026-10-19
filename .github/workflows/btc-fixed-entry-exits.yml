@@ -1,0 +1,185 @@
+name: Compare exits at fixed BTC entry points
+on:
+  push:
+    branches: [codex/btc-october-backtest]
+    paths: [.github/workflows/btc-fixed-entry-exits.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v4
+        with:
+          name: btc-october-1-7-data
+          run-id: 39224909453
+          github-token: ${{ github.token }}
+          path: tick-input
+      - uses: actions/download-artifact@v4
+        with:
+          name: btc-october-raw-replay
+          run-id: 39230335634
+          github-token: ${{ github.token }}
+          path: tick-baseline
+      - name: Prepare fixed-entry comparison
+        run: |
+          cat > tick-replay.cjs <<'JSREPLAY'
+          const fs=require('fs'),readline=require('readline');
+          const original=JSON.parse(fs.readFileSync('tick-baseline/tick-output/result.json'));
+          const marks=JSON.parse(fs.readFileSync('tick-input/mark-1m.json'));
+          const plan=original.events.filter(e=>e.action==='entry').map((e,i)=>({...e,channel:i<original.trades.length?original.trades[i].anchors:null}));
+          // The last open channel is recovered from the original entry trigger's known completed candles.
+          const vm=require('vm'),box={window:{}};vm.createContext(box);vm.runInContext(fs.readFileSync('tick-input/charts-source.js','utf8'),box);
+          const candles=JSON.parse(fs.readFileSync('tick-input/futures-15m.json'));
+          for(const e of plan){
+           const ref=candles.filter(c=>c.time+900<=Math.floor(e.trigger.time/900)*900);
+           const candidates=['high','low'].map(m=>box.window.HongIndicators.intradayFibonacci(ref,m)).filter(Boolean);e.candidates=candidates;
+           if(!e.channel){const cc=candidates.find(c=>c.anchors.every((a,i)=>a.time===e.trigger?.anchors?.[i]?.time));e.channel=(cc||candidates.sort((a,b)=>b.score-a.score)[0])?.anchors;}
+           if(!e.channel)throw Error('Missing frozen channel');
+           const [a,b,c]=e.channel;e.slope=Math.log(b.price/a.price)/((b.time-a.time)/900);e.width=Math.log(c.price/a.price)-e.slope*(c.time-a.time)/900;
+          }
+          const fee=.0005,END=1791385200,START=1790780400;
+          function levels(e,t){const a=e.channel[0];return [0,.5,1,1.5,2,2.5,3].map(r=>a.price*Math.exp(e.slope*(t-a.time)/900+r*e.width)).sort((a,b)=>a-b);}
+          const configs=[
+           {id:'baseline50',tp:.5,avg:true},
+           {id:'tp25',tp:.25,avg:true},
+           {id:'tp100',tp:1,avg:true},
+           {id:'noAverage50',tp:.5,avg:false},
+           {id:'protectAt25',tp:.5,avg:true,protect:.25},
+           {id:'stopAccount3pct',tp:.5,avg:true,stop:.3},
+           {id:'stopAccount5pct',tp:.5,avg:true,stop:.5},
+           {id:'half25rest50',tp:.5,avg:false,partial:.25},
+           {id:'maxHold4h',tp:.5,avg:true,maxSeconds:14400}
+          ];
+          const states=configs.map(cfg=>({cfg,cash:1000,pos:null,pending:null,trades:[],events:[],curve:[],peak:1000,mdd:0,minimumMaintenanceHeadroom:Infinity,markAmbiguous:false}));
+          const diagnostics=plan.map((e,i)=>({index:i+1,side:e.side,entryTime:e.time,entryPrice:e.price,margin:e.margin,maxGrossROI:-Infinity,minGrossROI:Infinity,timeToMax:null,timeToMin:null,maxBeforeBaselineExit:-Infinity,minBeforeBaselineExit:Infinity}));
+          let at=0,prev=null,beforePrev=null,lastMinute=null,rows=0,minuteBars=new Map(),idGaps=0;
+          const mm=new Map(marks.map(m=>[m.time,m]));
+          function netAt(p,price){return p.realized+p.side*(p.qty*price-p.cost)-p.qty*price*fee-p.fees;}
+          function exit(s,t,reason,fraction=1){
+           const p=s.pos,qty=p.qty*fraction,cost=p.cost*fraction,margin=p.margin*fraction,gross=p.side*(qty*t.price-cost),f=qty*t.price*fee;
+           s.cash+=margin+gross-f;p.realized+=gross-f;p.qty-=qty;p.cost-=cost;p.margin-=margin;
+           s.events.push({action:fraction===1?'exit':'partial',time:t.time,id:t.id,price:t.price,reason,trade:p.index,quantity:qty});
+           if(fraction===1){s.trades.push({trade:p.index,side:p.side,entryTime:p.time,exitTime:t.time,entryPrice:p.entryPrice,exitPrice:t.price,pnl:p.realized-p.fees,legs:p.legs,reason});s.pos=null;s.pending=null;}
+          }
+          function add(s,t,entry,k){
+           const p=s.pos,margin=entry.margin,n=margin*100;
+           if(s.cash+p.side*(p.qty*t.price-p.cost)<margin+n*fee){p.averageBlocked=true;return;}
+           s.cash-=margin+n*fee;p.qty+=n/t.price;p.cost+=n;p.margin+=margin;p.fees+=n*fee;p.legs++;p.k=k;
+           s.events.push({action:p.legs===1?'entry':'average',time:t.time,id:t.id,price:t.price,trade:p.index,margin});
+          }
+          function markSnapshot(t){
+           const bar=mm.get(t);if(!bar)return;
+           for(const s of states){const p=s.pos,equity=s.cash+(p?p.margin+p.side*(p.qty*bar.close-p.cost):0);s.peak=Math.max(s.peak,equity);s.mdd=Math.max(s.mdd,(s.peak-equity)/s.peak);s.curve.push({time:t,equity});}
+          }
+          function tick(t){
+           if(t.time<START||t.time>=END)return;
+           if(prev&&(t.id<=prev.id||t.time<prev.time))throw Error('Original order reversed');
+           if(prev&&t.id>prev.id+1)idGaps++;
+           rows++;const minute=Math.floor(t.time/60)*60;
+           const ob=minuteBars.get(minute);if(ob){ob.high=Math.max(ob.high,t.price);ob.low=Math.min(ob.low,t.price);ob.close=t.price;ob.volume+=t.qty;}else minuteBars.set(minute,{open:t.price,high:t.price,low:t.price,close:t.price,volume:t.qty});
+           if(lastMinute!==null&&minute!==lastMinute)markSnapshot(lastMinute);lastMinute=minute;
+           // All scenarios execute exactly the same seven original first entries and amounts.
+           if(at<plan.length&&t.id>=plan[at].id){
+            if(t.id!==plan[at].id||t.price!==plan[at].price)throw Error('Fixed entry differs from original');
+            const e=plan[at];
+            if(at===plan.length-1&&beforePrev){
+             const crossing=e.candidates.filter(c=>{const [a,b,d]=c.anchors,x={channel:c.anchors,slope:Math.log(b.price/a.price)/((b.time-a.time)/900)};x.width=Math.log(d.price/a.price)-x.slope*(d.time-a.time)/900;
+              const now=levels(x,e.trigger.time),old=levels(x,Math.max(beforePrev.time,Math.floor(e.trigger.time/900)*900));
+              return now.some((v,k)=>e.side===1?(beforePrev.price>old[k]&&e.trigger.price<=v):(beforePrev.price<old[k]&&e.trigger.price>=v));
+             }).sort((a,b)=>b.score-a.score);
+             if(!crossing.length)throw Error('Cannot reproduce last entry channel');
+             e.channel=crossing[0].anchors;const [a,b,c]=e.channel;e.slope=Math.log(b.price/a.price)/((b.time-a.time)/900);e.width=Math.log(c.price/a.price)-e.slope*(c.time-a.time)/900;
+            }
+            for(const s of states){if(s.pos)exit(s,t,'next-fixed-entry');s.pending=null;
+             const ls=levels(e,t.time),k=ls.reduce((best,p,j)=>Math.abs(p-t.price)<Math.abs(ls[best]-t.price)?j:best,0);
+             s.pos={index:at+1,side:e.side,time:t.time,entryPrice:t.price,initialMargin:e.margin,plan:e,k,qty:0,cost:0,margin:0,fees:0,realized:0,legs:0,protected:false,partialDone:false};add(s,t,e,k);
+            }at++;
+           }else for(const s of states){
+            if(s.pending&&s.pos){const order=s.pending;s.pending=null;if(order.type==='average')add(s,t,s.pos.plan,order.k);else exit(s,t,order.type,order.type==='partial'?.5:1);continue;}
+            const p=s.pos;if(!p)continue;
+            const grossROI=p.side*(t.price/p.entryPrice-1)*100;
+            if(s.cfg.protect&&grossROI>=s.cfg.protect)p.protected=true;
+            if(s.cfg.stop&&netAt(p,t.price)<=-s.cfg.stop*p.initialMargin){s.pending={type:'risk-stop'};continue;}
+            if(s.cfg.maxSeconds&&t.time-p.time>=s.cfg.maxSeconds){s.pending={type:'time-exit'};continue;}
+            if(p.legs>=2&&netAt(p,t.price)>=0){s.pending={type:'fee-breakeven'};continue;}
+            if(p.legs===1&&grossROI>=s.cfg.tp){s.pending={type:'take-profit'};continue;}
+            if(p.legs===1&&s.cfg.partial&&!p.partialDone&&grossROI>=s.cfg.partial){p.partialDone=true;s.pending={type:'partial'};continue;}
+            if(p.protected&&netAt(p,t.price)<=0){s.pending={type:'protected-breakeven'};continue;}
+            if(s.cfg.avg&&p.legs<2&&!p.averageBlocked&&!p.protected){const k=p.k-p.side;if(k>=0&&k<7){const a=p.plan.channel[0],r=p.plan.width>=0?k*.5:3-k*.5,l=a.price*Math.exp(p.plan.slope*(t.time-a.time)/900+r*p.plan.width);if(p.side===1?t.price<=l:t.price>=l)s.pending={type:'average',k};}}
+           }
+           if(at){const d=diagnostics[at-1],e=plan[at-1],roi=e.side*(t.price/e.price-1)*100;
+            if(roi>d.maxGrossROI){d.maxGrossROI=roi;d.timeToMax=t.time-e.time;}if(roi<d.minGrossROI){d.minGrossROI=roi;d.timeToMin=t.time-e.time;}
+            const end=original.trades[at-1]?.exitTime||END;if(t.time<=end){d.maxBeforeBaselineExit=Math.max(d.maxBeforeBaselineExit,roi);d.minBeforeBaselineExit=Math.min(d.minBeforeBaselineExit,roi);}
+           }
+           for(const s of states)if(s.pos){const p=s.pos,m=mm.get(minute),worst=p.side===1?m.low:m.high,head=s.cash+p.margin+p.side*(p.qty*worst-p.cost)-p.qty*worst*.004;s.minimumMaintenanceHeadroom=Math.min(s.minimumMaintenanceHeadroom,head);if(head<=0)s.markAmbiguous=true;}
+           beforePrev=prev;prev=t;
+          }
+          readline.createInterface({input:process.stdin,crlfDelay:Infinity}).on('line',line=>{const [id,time,price,qty]=line.split(',');tick({id:+id,time:+time/1000,price:+price,qty:+qty});}).on('close',()=>{
+           markSnapshot(lastMinute);const source=JSON.parse(fs.readFileSync('tick-input/futures-1m.json')),wanted=source.filter(b=>b.time>=START&&b.time<END);
+           if(rows!==original.summary.totalTicks||at!==7||minuteBars.size!==10080)throw Error('Coverage changed');
+           for(const b of wanted){const x=minuteBars.get(b.time);if(!x||['open','high','low','close','volume'].some(k=>Math.abs(x[k]-b[k])>1e-5))throw Error('OHLCV mismatch');}
+           const results=states.map(s=>{
+            const p=s.pos,mark=marks.at(-1).close,open=p?{trade:p.index,side:p.side,margin:p.margin,entryFees:p.fees,realized:p.realized,unrealized:p.side*(p.qty*mark-p.cost)}:null;
+            const final=s.cash+(p?p.margin+open.unrealized:0),check=1000+s.trades.reduce((a,t)=>a+t.pnl,0)+(open?open.realized+open.unrealized-open.entryFees:0);
+            if(Math.abs(check-final)>1e-6)throw Error('Ledger mismatch');if(s.markAmbiguous)throw Error('Possible cross liquidation: '+s.cfg.id);
+            return {config:s.cfg,final,returnPct:(final/1000-1)*100,maxMarkMinuteDrawdownPct:s.mdd*100,minimumMaintenanceHeadroom:s.minimumMaintenanceHeadroom,trades:s.trades,openPosition:open,events:s.events};
+           });
+           const baseline=results.find(r=>r.config.id==='baseline50');
+           // Record any difference rather than silently claiming the original has been reproduced.
+           const report={metadata:{fixedEntries:7,totalTicks:rows,idGaps,ohlcvMinutesVerified:minuteBars.size,originalFinal:original.summary.final,baselineFinalDifference:baseline.final-original.summary.final,comparison:'Same initial entry times, prices and absolute margin amounts. Any position still open at the next fixed entry is closed at that entry price so all scenarios retain one position. Last position is marked at period end. No new entries from early exits. Trading fees included; funding/order book impact excluded.'},diagnostics,results};
+           fs.mkdirSync('tick-output',{recursive:true});fs.writeFileSync('tick-output/fixed-entry-results.json',JSON.stringify(report,null,2));
+           console.log('FIXED_ENTRY_RESULTS '+JSON.stringify({metadata:report.metadata,diagnostics,results:results.map(r=>({id:r.config.id,final:r.final,returnPct:r.returnPct,mdd:r.maxMarkMinuteDrawdownPct,trades:r.trades.map(t=>({n:t.trade,pnl:t.pnl,reason:t.reason})),open:r.openPosition}))}));
+          });
+          JSREPLAY
+          cat > replay-raw.py <<'PYREPLAY'
+          import csv,datetime as dt,hashlib,io,json,pathlib,subprocess,urllib.request,zipfile,time
+          out=pathlib.Path('tick-output');out.mkdir(exist_ok=True)
+          sources=[]
+          def fetch(url):
+           for attempt in range(3):
+            try:
+             with urllib.request.urlopen(url,timeout=120) as r:return r.read()
+            except Exception:
+             if attempt==2:raise
+             time.sleep(2)
+          proc=subprocess.Popen(['node','tick-replay.cjs'],stdin=subprocess.PIPE,text=True,bufsize=1024*1024)
+          try:
+           for i in range(8):
+            day=dt.date(2026,9,30)+dt.timedelta(days=i)
+            url=f'https://data.binance.vision/data/futures/um/daily/trades/BTCUSDT/BTCUSDT-trades-{day}.zip'
+            print('Downloading raw trades',day,flush=True)
+            data=fetch(url);sha=hashlib.sha256(data).hexdigest();expected=fetch(url+'.CHECKSUM').decode().split()[0]
+            assert sha==expected,'SHA256 mismatch'
+            count=0
+            with zipfile.ZipFile(io.BytesIO(data)) as z:
+             names=[n for n in z.namelist() if n.endswith('.csv')];assert len(names)==1
+             with z.open(names[0]) as f:
+              for row in csv.reader(io.TextIOWrapper(f)):
+               if not row or not row[0].isdigit():continue
+               # Raw USDT futures trades: id, price, qty, quote_qty, time, is_buyer_maker.
+               stamp=int(row[4]);stamp=stamp//1000 if stamp>10**14 else stamp
+               if 1790780400000<=stamp<1791385200000:
+                proc.stdin.write(f'{row[0]},{stamp},{row[1]},{row[2]}\n');count+=1
+            sources.append({'day':str(day),'url':url,'sha256':sha,'zip_bytes':len(data),'selected_trades':count})
+            (out/'raw-sources.json').write_text(json.dumps(sources,indent=2))
+            print('Processed',day,count,'trades',len(data),'ZIP bytes',flush=True)
+            del data
+           proc.stdin.close();code=proc.wait();assert code==0,f'Replay exited {code}'
+          except BaseException:
+           proc.kill();proc.wait();raise
+          PYREPLAY
+      - name: Compare management rules in original trade order
+        run: python replay-raw.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: btc-fixed-entry-exits
+          path: |
+            tick-output/
+            tick-replay.cjs
+          retention-days: 30
