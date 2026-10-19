@@ -67,7 +67,7 @@ jobs:
           }
           function onTick(tick){
            if(tick.time<START||tick.time>=END)return;
-           if(previous&&(tick.id!==previous.id+1||tick.time<previous.time))throw Error('Raw trade ID or time order discontinuity at '+tick.id);
+           if(previous&&(tick.id!==previous.id+1||tick.time<previous.time))throw Error('Raw trade order diagnostic '+JSON.stringify({previous,current:tick,idDelta:tick.id-previous.id,timeDelta:tick.time-previous.time}));
            totalTicks++;if(!firstTick)firstTick=tick;lastTick=tick;
            const minute=Math.floor(tick.time/60)*60;
            if(minute!==minuteKey){finishMinute();minuteKey=minute;ohlc={open:tick.price,high:tick.price,low:tick.price,close:tick.price};}
