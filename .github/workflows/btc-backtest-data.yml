@@ -1,0 +1,33 @@
+name: Collect BTC backtest data (October 1-7)
+on:
+  workflow_dispatch:
+  push:
+    branches: [codex/btc-october-backtest]
+    paths:
+      - .github/workflows/btc-backtest-data.yml
+      - tools/collect_btc_backtest.py
+permissions:
+  contents: read
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - name: Collect and validate public archives
+        run: python tools/collect_btc_backtest.py
+      - name: Save original chart algorithm for reproducibility
+        if: always()
+        run: |
+          mkdir -p btc-backtest-data
+          cp charts.js btc-backtest-data/charts-source.js
+          git rev-parse HEAD > btc-backtest-data/source-commit.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: btc-october-1-7-data
+          path: btc-backtest-data/
+          retention-days: 30
