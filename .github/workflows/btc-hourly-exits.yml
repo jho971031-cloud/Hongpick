@@ -1,0 +1,109 @@
+name: BTC hourly LONG exit comparison
+'on':
+  push:
+    branches:
+    - codex/btc-october-backtest
+    paths:
+    - .github/workflows/btc-hourly-exits.yml
+  workflow_dispatch: null
+permissions:
+  contents: read
+  actions: read
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+    - uses: actions/checkout@v6
+    - uses: actions/download-artifact@v4
+      with:
+        name: btc-september-hourly-longonly
+        run-id: 39340705818
+        github-token: ${{ github.token }}
+        path: .
+    - name: Prepare five hourly long exit policies
+      run: "cat > hourly-replay.cjs <<'JSCODE'\nconst fs=require('fs'),vm=require('vm'),readline=require('readline');\nconst input='tick-input/',out='tick-output/';fs.mkdirSync(out,{recursive:true});\n\
+        const read=n=>JSON.parse(fs.readFileSync(input+n+'.json'));\nconst manifest=read('manifest'),mins=read('futures-1m'),marks=read('mark-1m');\nconst START=Date.parse(manifest.start_utc)/1000,END=Date.parse(manifest.end_utc_exclusive)/1000;\n\
+        const box={window:{}};vm.createContext(box);vm.runInContext(fs.readFileSync(input+'charts-source.js','utf8'),box);\nconst I=box.window.HongIndicators;\nfunction buildSignals(bars,seconds){\n const\
+        \ rsis=new Map(I.rsi(bars).map(r=>[r.time,r.value])),signals=new Map();\n for(let i=288;i<bars.length;i++){\n  const history=bars.slice(0,i),rsi=rsis.get(history.at(-1).time);\n  if(rsi>30&&rsi<70)continue;\n\
+        \  signals.set(bars[i].time,{rsi,channels:['high','low'].map(m=>I.intradayFibonacci(history,m)).filter(Boolean).map(c=>{\n   const [a,b,d]=c.anchors,slope=Math.log(b.price/a.price)/((b.time-a.time)/seconds);\n\
+        \   return {...c,frameSeconds:seconds,origin:a.price,epoch:a.time,slope,width:Math.log(d.price/a.price)-slope*(d.time-a.time)/seconds};\n  })});\n }\n return signals;\n}\nconst signalSets={900:buildSignals(read('futures-15m'),900),3600:buildSignals(read('futures-60m'),3600)};\n\
+        const ratios=[0,.5,1,1.5,2,2.5,3];\nconst levels=(c,t)=>ratios.map(r=>c.origin*Math.exp(c.slope*(t-c.epoch)/c.frameSeconds+r*c.width)).sort((a,b)=>a-b);\n\nfunction makeEngine(cfg){\n const signals=signalSets[cfg.frameSeconds];\n\
+        \ const out='tick-output/'+cfg.id+'/';fs.mkdirSync(out,{recursive:true});\nconst FEE=.0005,MMR=.004;\nlet peakMark=1000,maxMarkDD=0,fillVersion=0,minuteFillVersion=-1,minuteStartPosition=null,firstUnsafe=null,liquidation=null,halted=false;\n\
+        function markSnapshot(){if(minuteKey===null)return;const m=markMap.get(minuteKey);if(!m)throw Error('Missing mark');const equity=cash+(pos?pos.margin+pos.side*(pos.qty*m.close-pos.cost):0);peakMark=Math.max(peakMark,equity);maxMarkDD=Math.max(maxMarkDD,(peakMark-equity)/peakMark);curve.push({time:minuteKey,equity});}\n\
+        let cash=1000,pos=null,pending=null,previous=null,totalTicks=0,firstTick=null,lastTick=null;\nlet minHeadroom=Infinity,maxDD=0,peak=1000,minuteKey=null,ohlc=null,mismatches=0,checkedMinutes=0,ambiguousLiquidation=false,idGapCount=0,unusedIdCount=0;\n\
+        const events=[],trades=[],curve=[],audit=[],minutesMap=new Map(mins.map(x=>[x.time,x])),markMap=new Map(marks.map(x=>[x.time,x]));\nconst record=(obj)=>{events.push(obj);audit.push({event:obj,previousTick:previous});};\n\
+        function finishMinute(){\n if(!ohlc)return;markSnapshot();\n const expected=minutesMap.get(minuteKey);checkedMinutes++;\n if(!expected||(['open','high','low','close'].some(k=>Math.abs(expected[k]-ohlc[k])>1e-6)||Math.abs(expected.volume-ohlc.volume)>1e-5))mismatches++;\n\
+        \ if(pos&&minuteStartPosition&&minuteFillVersion===fillVersion&&!liquidation){\n  const m=markMap.get(minuteKey),p=pos,worst=p.side===1?m.low:m.high;\n  const equityAt=x=>cash+p.margin+p.side*(p.qty*x-p.cost);\n\
+        \  const head=equityAt(worst)-p.qty*worst*MMR;\n  if(head<=0){\n   const threshold=(cash+p.margin-p.side*p.cost)/(p.qty*(MMR-p.side));\n   liquidation={interval:{start:minuteKey,endExclusive:minuteKey+60},firstUnsafe,position:JSON.parse(JSON.stringify(p)),cash,mark:m,theoreticalLiquidationPrice:threshold,equityAtThreshold:equityAt(threshold),maintenanceAtThreshold:p.qty*threshold*MMR,assumedClearanceRate:.0125,clearanceFeeNotional:p.qty*threshold*.0125,walletBefore:p.startEquity,hypotheticalLastTradeNet:-p.startEquity,settlement:'Full\
+        \ liquidation simplification: remaining collateral consumed by clearance fee capped at available funds. Zero balance, no further entries. Not an actual exchange liquidation fill.',proof:'Position\
+        \ unchanged for the entire recorded mark-price minute with zero fills/rejections. Actual adverse mark extreme breaches maintenance without guessing OHLC order.'};\n   if(Math.abs(1000+trades.reduce((a,t)=>a+t.pnl,0)-p.startEquity)>1e-6)throw\
+        \ Error('Pre-liquidation ledger mismatch');\n   record({time:minuteKey+60,action:'cross-liquidation-model',interval:liquidation.interval,theoreticalLiquidationPrice:threshold,net:-p.startEquity});\n\
+        \   halted=true;cash=0;pos=null;pending=null;maxDD=1;maxMarkDD=1;curve.push({time:minuteKey,equity:0,modeledLiquidation:true});\n  }\n }\n\n}\nfunction fill(tick){\n fillVersion++;\n const order=pending;pending=null;\n\
+        \ if(order.type==='entry')pos={side:order.side,channel:order.channel,k:order.k,legMargin:cash*(order.side===1?.1:cfg.shortFraction),startEquity:cash,margin:0,cost:0,qty:0,fees:0,legs:0,time:tick.time,rsi:order.rsi,firstPrice:tick.price};\n\
+        \ if(order.type==='entry'||order.type==='average'){\n  const margin=pos.legMargin,notional=margin*100,existingPnl=pos.side*(pos.qty*tick.price-pos.cost);\n  if(cash+existingPnl<margin+notional*FEE){record({...tick,action:'order-rejected',type:order.type});if(!pos.legs)pos=null;else\
+        \ pos.averageBlocked=true;return;}\n  const qty=notional/tick.price;cash-=margin+notional*FEE;pos.margin+=margin;pos.cost+=notional;pos.qty+=qty;pos.fees+=notional*FEE;pos.legs++;\n  if(order.type==='average')pos.k=order.k;\n\
+        \  record({...tick,action:order.type,side:pos.side,legs:pos.legs,qty,margin,anchors:pos.channel.anchors,rsi:pos.rsi,trigger:order.trigger});\n }else {\n  const gross=pos.side*(pos.qty*tick.price-pos.cost),exitFee=pos.qty*tick.price*FEE,net=gross-exitFee-pos.fees;\n\
+        \  cash+=pos.margin+gross-exitFee;\n  trades.push({startEquity:pos.startEquity,lossLimit:.1*pos.startEquity,quantity:pos.qty,initialMargin:pos.legMargin,side:pos.side===1?'LONG':'SHORT',entryTime:pos.time,exitTime:tick.time,entryPrice:pos.firstPrice,averagePrice:pos.cost/pos.qty,exitPrice:tick.price,exitTradeId:tick.id,legs:pos.legs,margin:pos.margin,pnl:net,fees:pos.fees+exitFee,reason:order.reason||(pos.legs===1?'roi100':'fee-inclusive-breakeven'),balance:cash,trigger:order.trigger,anchors:pos.channel.anchors});\n\
+        \  record({...tick,action:'exit',reason:order.reason||(pos.legs===1?'roi100':'fee-inclusive-breakeven'),legs:pos.legs,net,netAtTrigger:order.netAtTrigger,lossLimit:order.lossLimit,trigger:order.trigger});pos=null;\n\
+        \ }\n}\nfunction onTick(tick){\n if(tick.time<START||tick.time>=END)return;\n if(previous&&(tick.id<=previous.id||tick.time<previous.time))throw Error('Raw trade order diagnostic '+JSON.stringify({previous,current:tick,idDelta:tick.id-previous.id,timeDelta:tick.time-previous.time}));\n\
+        \ if(previous&&tick.id>previous.id+1){idGapCount++;unusedIdCount+=tick.id-previous.id-1;}\n totalTicks++;if(!firstTick)firstTick=tick;lastTick=tick;\n const minute=Math.floor(tick.time/60)*60;\n\
+        \ if(minute!==minuteKey){finishMinute();minuteKey=minute;minuteFillVersion=fillVersion;minuteStartPosition=pos?JSON.parse(JSON.stringify(pos)):null;ohlc={open:tick.price,high:tick.price,low:tick.price,close:tick.price,volume:tick.qty};}\n\
+        \ else {ohlc.high=Math.max(ohlc.high,tick.price);ohlc.low=Math.min(ohlc.low,tick.price);ohlc.close=tick.price;ohlc.volume+=tick.qty;}\n if(halted){previous=tick;return;}\n let justFilled=false;\n\
+        \ if(pending){fill(tick);justFilled=true;}\n if(pos){\n  const mark=markMap.get(minute);if(!mark)throw Error('No mark bound');\n  // Bounds are audit-only. Future minute extrema never select entries/exits.\n\
+        \  const worst=pos.side===1?mark.low:mark.high,headroom=cash+pos.margin+pos.side*(pos.qty*worst-pos.cost)-pos.qty*worst*MMR;\n  minHeadroom=Math.min(minHeadroom,headroom);if(headroom<=0){ambiguousLiquidation=true;if(!firstUnsafe)firstUnsafe={time:tick.time,minute,mark,cash,position:JSON.parse(JSON.stringify(pos)),headroom};}\n\
+        \  const equity=cash+pos.margin+pos.side*(pos.qty*tick.price-pos.cost);peak=Math.max(peak,equity);maxDD=Math.max(maxDD,(peak-equity)/peak);\n  if(!justFilled){\n   const target=pos.legs===1?(pos.cost+pos.side*(cfg.targetROI??Infinity)*pos.margin)/pos.qty:(pos.side===1?(pos.cost+pos.fees)/(pos.qty*(1-FEE)):(pos.cost-pos.fees)/(pos.qty*(1+FEE)));\n\
+        \   const gross=pos.side*(pos.qty*tick.price-pos.cost),net=gross-pos.qty*tick.price*FEE-pos.fees;\n   if(pos.legs===1&&gross/pos.legMargin>=.5&&!pos.protected){pos.protected=true;record({...tick,action:'protection-activated',netFloor:.25*pos.legMargin});}\n\
+        \   if(pos.legs===1&&pos.protected){pos.peakNet=Math.max(pos.peakNet??net,net);pos.netFloor=cfg.exitMode==='trailing'?Math.max(.25*pos.legMargin,.5*pos.peakNet):.25*pos.legMargin;}\n   const channelTarget=cfg.exitMode==='channel'&&pos.legs===1?levels(pos.channel,tick.time)[pos.k+1]:null;\n\
+        \   const actualTarget=channelTarget??target;\n   if(cfg.stop&&net<=-.1*pos.startEquity)pending={type:'exit',reason:'account-loss10',trigger:tick,netAtTrigger:net,lossLimit:.1*pos.startEquity};\n\
+        \   else if(pos.side===1?tick.price>=actualTarget:tick.price<=actualTarget)pending={type:'exit',reason:pos.legs>1?'fee-inclusive-breakeven':cfg.exitMode==='channel'&&channelTarget!==null?'next-channel':('roi'+(100*cfg.targetROI)),trigger:tick,target:actualTarget};\n\
+        \   else if(pos.legs===1&&pos.protected&&net<=pos.netFloor)pending={type:'exit',reason:cfg.exitMode==='trailing'?'trailing-net50':'profit-lock-net25',trigger:tick};\n   else if(pos.legs<2&&!pos.averageBlocked&&!pos.protected){\n\
+        \    const k=pos.k-pos.side;if(k>=0&&k<7){const price=levels(pos.channel,tick.time)[k];\n     if(pos.side===1?tick.price<=price:tick.price>=price)pending={type:'average',k,trigger:tick};}\n   }\n\
+        \  }\n }else if(!justFilled&&previous){\n  const sig=signals.get(Math.floor(tick.time/cfg.frameSeconds)*cfg.frameSeconds);\n  if(sig&&(!cfg.longOnly||sig.rsi<=30)){const side=sig.rsi<=30?1:-1,candidates=[];\n\
+        \   for(const channel of sig.channels){const now=levels(channel,tick.time),before=levels(channel,Math.max(previous.time,Math.floor(tick.time/cfg.frameSeconds)*cfg.frameSeconds));\n    for(let k=0;k<7;k++)if(side===1?(previous.price>before[k]&&tick.price<=now[k]):(previous.price<before[k]&&tick.price>=now[k]))candidates.push({channel,k});}\n\
+        \   candidates.sort((a,b)=>b.channel.score-a.channel.score);\n   if(candidates.length)pending={type:'entry',side,...candidates[0],rsi:sig.rsi,trigger:tick};\n  }\n }\n \n previous=tick;\n}\n\n return\
+        \ {onTick,finish:()=>{\n finishMinute();const markPrice=marks.at(-1).close;\n const openPosition=pos?{side:pos.side===1?'LONG':'SHORT',entryTime:pos.time,entryPrice:pos.firstPrice,anchors:pos.channel.anchors,legs:pos.legs,margin:pos.margin,averagePrice:pos.cost/pos.qty,markPrice,unrealized:pos.side*(pos.qty*markPrice-pos.cost),entryFees:pos.fees}:null;\n\
+        \ const final=cash+(openPosition?openPosition.margin+openPosition.unrealized:0);\n const ledger=1000+trades.reduce((s,t)=>s+t.pnl,0)+(liquidation?liquidation.hypotheticalLastTradeNet:0)+(openPosition?openPosition.unrealized-openPosition.entryFees:0);\n\
+        \ if(Math.abs(ledger-final)>1e-6)throw Error('Ledger does not reconcile');\n if(checkedMinutes!==(END-START)/60||mismatches)throw Error('Raw trade OHLC does not match all requested minutes: '+checkedMinutes+'\
+        \ mismatches '+mismatches);\n if(ambiguousLiquidation&&!liquidation)throw Error('Mark-price bounds permit liquidation; higher-resolution mark data required. Do not report final return.');\n const\
+        \ summary={initial:1000,final,returnPct:(final/1000-1)*100,closedTrades:trades.length,wins:trades.filter(t=>t.pnl>1e-6).length,losses:trades.filter(t=>t.pnl< -1e-6).length,breakevens:trades.filter(t=>Math.abs(t.pnl)<=1e-6).length,liquidationsRuledOut:!ambiguousLiquidation,liquidations:liquidation?1:0,minMaintenanceHeadroom:minHeadroom,maxMarkMinuteDrawdownPct:maxMarkDD*100,maxTradePriceDrawdownPct:maxDD*100,totalTicks,idGapCount,unusedIdCount,checkedMinutes,ohlcMismatches:mismatches,firstTick,lastTick,fees:trades.reduce((s,t)=>s+t.fees,0)+(openPosition?.entryFees||0)+(liquidation?.position.fees||0),modeledLiquidationFee:liquidation?Math.min(Math.max(0,liquidation.equityAtThreshold),liquidation.clearanceFeeNotional):0};\n\
+        \ if(cfg.longOnly&&(trades.some(t=>t.side!=='LONG')||events.some(e=>e.action==='entry'&&e.side!==1)))throw Error('Unexpected short entry');\n const result={config:cfg,summary,liquidation,openPosition,trades,events,audit,curve,assumptions:{execution:'Signal\
+        \ on observed raw trade; market fill on next recorded raw trade. Hypothetical fills, zero latency beyond next tick and no order-book impact.',signal:'Previous completed '+(cfg.frameSeconds/60)+'m\
+        \ Wilder RSI14 and Hong Pick intraday channel on that same frame; anchors frozen at entry. Same 240-candle channel search and 288-candle RSI warmup.',margin:cfg.longOnly?('Cross 100x, LONG ONLY.\
+        \ Initial 10% plus one equal 10% average. '+(cfg.stop?'Instant fee-inclusive loss10% of pre-entry wallet stop.':'No discretionary stop.')):cfg.stop?'Cross 100x. LONG initial 10% plus one equal 10%;\
+        \ SHORT initial '+(cfg.shortFraction*100)+'% plus one equal amount. Instant fee-inclusive loss10% of pre-entry wallet stop. No channel-break stop.':'Cross 100x. LONG initial 10% plus one equal 10%;\
+        \ SHORT initial '+(cfg.shortFraction*100)+'% plus one equal amount. No discretionary stop.',exit:'First-leg take profit per config: fixed gross margin ROI, or next higher frozen-anchor channel (ROI200\
+        \ fallback if no higher line), or uncapped trailing. All activate protection at gross ROI50 with net25 initial margin floor. Trailing raises floor to 50% of highest observed net profit. No averaging\
+        \ after protection. After one average fee-inclusive breakeven.',fees:'0.05% taker each fill; funding and slippage/order-book effects excluded.',mark:'Actual 1m mark adverse bounds audit liquidation.\
+        \ Confirmed persistent-position breach settles under explicit full-liquidation model; no fabricated mark intraminute sequence. MMR fixed 0.4%.'}};\n fs.writeFileSync(out+'result.json',JSON.stringify(result,null,2));console.log('TICK_REPLAY_RESULT\
+        \ '+JSON.stringify({config:cfg,...summary}));return result;\n\n }};\n}\n\nconst configs=[{\"id\":\"baseline\",\"shortFraction\":0.05,\"longOnly\":true,\"stop\":false,\"frameSeconds\":3600,\"targetROI\"\
+        :1,\"exitMode\":\"fixed\"},{\"id\":\"target150\",\"shortFraction\":0.05,\"longOnly\":true,\"stop\":false,\"frameSeconds\":3600,\"targetROI\":1.5,\"exitMode\":\"fixed\"},{\"id\":\"target200\",\"\
+        shortFraction\":0.05,\"longOnly\":true,\"stop\":false,\"frameSeconds\":3600,\"targetROI\":2,\"exitMode\":\"fixed\"},{\"id\":\"trailing50\",\"shortFraction\":0.05,\"longOnly\":true,\"stop\":false,\"\
+        frameSeconds\":3600,\"targetROI\":null,\"exitMode\":\"trailing\"},{\"id\":\"next-channel\",\"shortFraction\":0.05,\"longOnly\":true,\"stop\":false,\"frameSeconds\":3600,\"targetROI\":2,\"exitMode\"\
+        :\"channel\"}];\nconst engines=configs.map(makeEngine);\nconst stream=readline.createInterface({input:process.stdin,crlfDelay:Infinity});\nstream.on('line',line=>{const [id,time,price,qty]=line.split(',');const\
+        \ tick={id:+id,time:+time/1000,price:+price,qty:+qty};for(const e of engines)e.onTick(tick);});\nstream.on('close',()=>{\n const results=engines.map(e=>e.finish());\n const base=results[0],difference=base.summary.final-1311.2616794861533;\n\
+        \ if(Math.abs(difference)>1e-6||base.summary.totalTicks!==96508212)throw Error('Original baseline regression failed: '+difference);\n const comparison={metadata:{start:manifest.start_utc,endExclusive:manifest.end_utc_exclusive,totalTicks:base.summary.totalTicks,checkedMinutes:base.summary.checkedMinutes,baselineFinalDifference:difference},results:results.map(r=>({config:r.config,summary:r.summary,liquidation:r.liquidation?{interval:r.liquidation.interval,entryTime:r.liquidation.position.time,side:r.liquidation.position.side,walletBefore:r.liquidation.walletBefore,theoreticalLiquidationPrice:r.liquidation.theoreticalLiquidationPrice}:null,open:r.openPosition,reasons:r.trades.reduce((a,t)=>(a[t.reason]=(a[t.reason]||0)+1,a),{})}))};\n\
+        \ fs.writeFileSync('tick-output/comparison.json',JSON.stringify(comparison,null,2));console.log('HOURLY_EXIT_COMPARISON '+JSON.stringify(comparison));\n});\n\nJSCODE\ncat > replay-raw.py <<'PYCODE'\n\
+        import csv,datetime as dt,hashlib,io,json,pathlib,subprocess,urllib.request,zipfile,time\nout=pathlib.Path('tick-output');out.mkdir(exist_ok=True)\nsources=[]\ndef fetch(url):\n for attempt in range(3):\n\
+        \  try:\n   with urllib.request.urlopen(url,timeout=120) as r:return r.read()\n  except Exception:\n   if attempt==2:raise\n   time.sleep(2)\nproc=subprocess.Popen(['node','hourly-replay.cjs'],stdin=subprocess.PIPE,text=True,bufsize=1024*1024)\n\
+        try:\n for i in range(31):\n  day=dt.date(2026,8,31)+dt.timedelta(days=i)\n  url=f'https://data.binance.vision/data/futures/um/daily/trades/BTCUSDT/BTCUSDT-trades-{day}.zip'\n  print('Downloading\
+        \ raw trades',day,flush=True)\n  data=fetch(url);sha=hashlib.sha256(data).hexdigest();expected=fetch(url+'.CHECKSUM').decode().split()[0]\n  assert sha==expected,'SHA256 mismatch'\n  count=0\n \
+        \ with zipfile.ZipFile(io.BytesIO(data)) as z:\n   names=[n for n in z.namelist() if n.endswith('.csv')];assert len(names)==1\n   with z.open(names[0]) as f:\n    for row in csv.reader(io.TextIOWrapper(f)):\n\
+        \     if not row or not row[0].isdigit():continue\n     # Raw USDT futures trades: id, price, qty, quote_qty, time, is_buyer_maker.\n     stamp=int(row[4]);stamp=stamp//1000 if stamp>10**14 else\
+        \ stamp\n     if 1788188400000<=stamp<1790780400000:\n      proc.stdin.write(f'{row[0]},{stamp},{row[1]},{row[2]}\\n');count+=1\n  sources.append({'day':str(day),'url':url,'sha256':sha,'zip_bytes':len(data),'selected_trades':count})\n\
+        \  (out/'raw-sources.json').write_text(json.dumps(sources,indent=2))\n  print('Processed',day,count,'trades',len(data),'ZIP bytes',flush=True)\n  del data\n proc.stdin.close();code=proc.wait();assert\
+        \ code==0,f'Replay exited {code}'\nexcept BaseException:\n proc.kill();proc.wait();raise\nPYCODE\nrm -rf tick-output"
+    - name: Replay actual September trades for hourly exit comparison
+      run: python replay-raw.py
+    - uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: btc-hourly-exits
+        path: 'tick-input/
+
+          tick-output/
+
+          hourly-replay.cjs
+
+          replay-raw.py'
+        retention-days: 30
