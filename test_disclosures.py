@@ -83,10 +83,10 @@ class TrumpDisclosureTests(unittest.TestCase):
         data=json.loads((Path(__file__).parent/'data-trump-transactions.json').read_text())
         rows=data['rows'];keys=[(x['sourceUrl'],x['id']) for x in rows]
         self.assertEqual(len(keys),len(set(keys)))
-        latest=[x for x in rows if x.get('reportDate')=='2026-09-17']
-        self.assertTrue(latest)
-        self.assertTrue(all(x['publicDate']=='2026-10-08' and x['receivedDate']=='2026-09-25' and x['tradeDate'].startswith('2026-08-') for x in latest))
-        nvda=next(x for x in latest if x['id']==473)
-        self.assertEqual((nvda['ticker'],nvda['action'],nvda['amount']),('NVDA','sell','$500,001–$1,000,000'))
+        for row in rows:
+            self.assertLessEqual(row['tradeDate'],row['publicDate'])
+            if row['publicDate']>='2026-10-08':
+                self.assertTrue(row.get('sourceSha256'))
+                self.assertEqual(row.get('validation'),'ocr-two-pass-agreement-v2')
 
 if __name__=='__main__':unittest.main()

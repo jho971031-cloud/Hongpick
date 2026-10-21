@@ -207,7 +207,7 @@ def oge_catalog():
         if not rows:raise ValueError('No official catalogue records')
         return {'reports':rows,'source':'US Office of Government Ethics','updated':now()}
     # New key avoids retaining a successful-looking v2 response from an old process.
-    return cached('oge-catalog-v3',3600,load,'data-trump-catalog.json')
+    return cached('oge-catalog-v3',240,load,'data-trump-catalog.json')
 
 def trump():
     catalog=oge_catalog();data=json.loads((BASE/'data-trump-transactions.json').read_text()) if (BASE/'data-trump-transactions.json').exists() else {'rows':[]}
@@ -219,6 +219,6 @@ def format_trump(catalog,data):
     reports=sorted(reports.values(),key=lambda x:(x['publicDate'],x['sourceUrl']),reverse=True)
     rows=sorted(data.get('rows',[]),key=lambda x:(x['publicDate'],x['tradeDate'],x['id']),reverse=True)
     verified_urls={x['sourceUrl'] for x in rows}
-    pending=[x for x in reports if '278 Transaction' in x['type'] and x['sourceUrl'] not in verified_urls and x['publicDate']>=data.get('coverageStartDate','9999-12-31')]
+    pending=[x for x in reports if '278 Transaction' in x['type'] and x['sourceUrl'] not in verified_urls and x['publicDate']>=data.get('coverageStartDate','2026-09-22')]
     latest=max((x['publicDate'] for x in reports if '278 Transaction' in x['type']),default=None)
     return dict(data,rows=rows,reports=reports,catalogUpdated=catalog.get('updated'),catalogStale=catalog.get('stale',False),latestReportDate=latest,latestVerifiedPublicDate=max((x['publicDate'] for x in rows),default=None),latestTradeDate=max((x['tradeDate'] for x in rows),default=None),pendingReports=pending,notice='공개된 신고 거래입니다. 제3자 독립 운용 거래가 포함될 수 있으며 트럼프 본인의 직접 투자 결정을 의미하지 않습니다. 금액은 신고 구간입니다. 검증된 주요 주식 거래만 표시하며 미검증 신규 문서는 별도 안내합니다.')

@@ -1,0 +1,52 @@
+name: Refresh Trump disclosures
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '3-58/5 * * * *'
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: hongpick-pages
+  cancel-in-progress: false
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    outputs:
+      collection_failed: ${{ steps.collect.outputs.collection_failed }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: sudo apt-get update -qq && sudo apt-get install -y poppler-utils tesseract-ocr
+      - name: Restore last successful site for the current code revision
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python restore_pages.py
+      - name: Collect official disclosure catalogue and transactions
+        id: collect
+        run: python trump_refresh.py --public public
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: public
+  deploy:
+    needs: refresh
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/deploy-pages@v4
+        id: deployment
+      - name: Record upstream collection failures after publishing visible status
+        if: needs.refresh.outputs.collection_failed == 'true'
+        run: |
+          echo 'OGE collection failed; last verified rows and failure status remain visible.'
+          exit 1

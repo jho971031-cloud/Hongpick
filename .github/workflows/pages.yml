@@ -21,11 +21,12 @@ jobs:
           python-version: '3.13'
           cache: pip
       - run: pip install -r requirements.txt
+      - run: sudo apt-get update -qq && sudo apt-get install -y poppler-utils tesseract-ocr
       - name: Verify architecture on code changes
         if: github.event_name != 'schedule'
         run: |
           python build_static.py --output public
-          python -m unittest -v test_architecture.py test_disclosures.py
+          python -m unittest -v test_architecture.py test_disclosures.py test_trump_refresh.py
           node test_data_client.js
           node test_hongpicks.js
           node test_live_data.js

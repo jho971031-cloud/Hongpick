@@ -47,7 +47,14 @@ def build(output,refresh=False,cache_dir=None):
     gurus['updated']=max((x.get('updated','') for x in investors),default=None)
     write('data-gurus.json',gurus);manifest['resources']['gurus']='data-gurus.json'
     catalog=collect('trump-catalog',d.oge_catalog,'data-trump-catalog.json')
-    trump=d.format_trump(catalog,read('data-trump-transactions.json'))
+    transactions=read('data-trump-transactions.json')
+    if refresh:
+        from trump_refresh import collect_transactions,read_previous
+        state=Path(os.environ['HONGPICK_CACHE_DIR'])/'trump-automatic.json'
+        previous=read_previous(state,live=True)
+        transactions=collect_transactions(catalog,previous)
+        state.write_text(json.dumps(transactions,ensure_ascii=False))
+    trump=d.format_trump(catalog,transactions)
     write('data-trump.json',trump);manifest['resources']['trump']='data-trump.json'
     selected={x['tv'] for data in turns.values() for x in data.get('rows',[])}
     selected.update(x['tv'] for inv in investors for x in inv.get('holdings',[])[:10] if x.get('tv'))
