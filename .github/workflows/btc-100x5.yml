@@ -1,0 +1,41 @@
+name: BTC September 100x 5pct hybrid validation
+'on':
+  push:
+    branches:
+    - codex/btc-october-backtest
+    paths:
+    - .github/workflows/btc-100x5.yml
+    - backtests/btc-100x5/**
+  workflow_dispatch: null
+permissions:
+  contents: read
+  actions: read
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+    - uses: actions/checkout@v6
+    - uses: actions/setup-node@v6
+      with:
+        node-version: '22'
+    - uses: actions/download-artifact@v4
+      with:
+        name: btc-september-hourly-15m-hybrid
+        run-id: 39552286796
+        github-token: ${{ github.token }}
+        path: run-data
+    - name: Prepare matched BTC inputs and original control
+      run: 'cp run-data/tick-output/baseline-hourly/result.json run-data/hourly-baseline.json
+
+        cp backtests/btc-100x5/replay.cjs backtests/btc-100x5/replay-raw.py run-data/'
+    - name: Replay all September BTC trades at 100x 5pct
+      working-directory: run-data
+      run: python replay-raw.py
+    - uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: btc-september-100x-5pct
+        path: run-data/
+        retention-days: 30
+        if-no-files-found: error
