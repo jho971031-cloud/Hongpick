@@ -1,0 +1,5 @@
+paper-data
+validation-*
+*.reference.txt
+render.schema.json
+*.zip

@@ -1,0 +1,1 @@
+{"name":"hongpick-btc-paper-bot","version":"0.2.0","private":true,"description":"Read-only Bitget BTC paper trading worker","engines":{"node":">=22"},"scripts":{"start":"node bot.cjs","check":"node bot.cjs --once","status":"node status.cjs","test":"node test-state.cjs && node test-switching.cjs && node test-storage.cjs"}}

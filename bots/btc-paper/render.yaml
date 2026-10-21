@@ -1,0 +1,19 @@
+services:
+  - type: worker
+    name: hongpick-btc-paper-100x5
+    runtime: docker
+    repo: https://github.com/jho971031-cloud/Hongpick
+    branch: codex/btc-october-backtest
+    plan: 0.5c-512mb
+    region: singapore
+    numInstances: 1
+    autoDeployTrigger: 'off'
+    dockerfilePath: ./bots/btc-paper/Dockerfile
+    dockerContext: ./bots/btc-paper
+    envVars:
+      - key: PAPER_DATA_DIR
+        value: /var/data
+    disk:
+      name: btc-paper-state
+      mountPath: /var/data
+      sizeGB: 1

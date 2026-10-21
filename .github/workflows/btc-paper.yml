@@ -1,0 +1,23 @@
+name: BTC paper worker checks
+on:
+  workflow_dispatch:
+  push:
+    branches: [codex/btc-october-backtest]
+    paths: ['bots/btc-paper/**', '.github/workflows/btc-paper.yml']
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - run: npm test
+        working-directory: bots/btc-paper
+      - run: docker build -t hongpick-btc-paper bots/btc-paper
+      - run: docker run --rm hongpick-btc-paper node test-state.cjs
+      - run: docker run --rm hongpick-btc-paper node test-storage.cjs
+      - run: docker run --rm hongpick-btc-paper node test-switching.cjs
