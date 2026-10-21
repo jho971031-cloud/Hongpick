@@ -1,0 +1,45 @@
+name: ETH September hourly priority with 15m fallback
+'on':
+  push:
+    branches:
+    - codex/btc-october-backtest
+    paths:
+    - .github/workflows/eth-hybrid.yml
+    - backtests/eth-hybrid/**
+  workflow_dispatch: null
+permissions:
+  contents: read
+  actions: read
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+    - uses: actions/checkout@v6
+    - uses: actions/setup-node@v6
+      with:
+        node-version: '22'
+    - name: Verify switching and shared-wallet accounting
+      run: node backtests/eth-hybrid/test-hybrid.cjs
+    - uses: actions/download-artifact@v4
+      with:
+        name: eth-september-15m-long5-50x
+        run-id: 39354875340
+        github-token: ${{ github.token }}
+        path: run-data
+    - name: Prepare original data and exact baseline assertions
+      run: 'cp run-data/tick-output/eth-15m-long5-50x-no-stop/result.json run-data/baseline-0.json
+
+        cp run-data/tick-output/regression-eth-hourly-long5/result.json run-data/baseline-1.json
+
+        cp backtests/eth-hybrid/replay.cjs backtests/eth-hybrid/replay-raw.py run-data/'
+    - name: Replay all September ETH raw trades in observed order
+      working-directory: run-data
+      run: python replay-raw.py
+    - uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: eth-september-hourly-15m-hybrid
+        path: run-data/
+        retention-days: 30
+        if-no-files-found: error
