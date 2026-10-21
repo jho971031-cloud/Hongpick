@@ -25,7 +25,7 @@ jobs:
         if: github.event_name != 'schedule'
         run: |
           python build_static.py --output public
-          python -m unittest -v test_architecture.py
+          python -m unittest -v test_architecture.py test_disclosures.py
           node test_data_client.js
           node test_hongpicks.js
           node test_live_data.js

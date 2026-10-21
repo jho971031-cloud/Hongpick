@@ -179,26 +179,46 @@ def summarize_gurus(rows):
     consensus=sorted(consensus.values(),key=lambda x:(x['increase']+x['new'],x['held']),reverse=True)
     return {'rows':rows,'consensus':consensus,'source':'SEC EDGAR 13F-HR','updated':now(),'notice':'분기말 미국 13F 신고대상 보유주식. 비중은 옵션·원금형 자산을 제외한 신고 주식 합계 기준입니다. 주식수 증감은 분할·이전 등의 영향을 받을 수 있어 실제 체결 매수/매도와 같지 않습니다. 현금·공매도·해외자산 등은 포함하지 않습니다.','mixedQuarters':len(quarters)>1}
 
-OGE_API='https://extapps2.oge.gov/201/Presiden.nsf/API.xsp/v2/rest'
+OGE_API='https://extapps2.oge.gov/201/Presiden.nsf/API.xsp/v3/rest'
+def parse_oge_records(records):
+    rows=[]
+    for x in records:
+        # The search also returns Ivanka Trump; only this filer belongs here.
+        if re.sub(r'[^a-z]', '', x.get('name','').lower()) != 'trumpdonaldj':continue
+        for link in re.findall(r'href=[\"\x27]([^\"\x27]+)',x.get('type','')):
+            url=html.unescape(link)
+            if url.startswith('https://extapps2.oge.gov/') and '.pdf' in url.lower():
+                rows.append({'publicDate':x['docDate'][:10],'name':x['name'],'type':re.sub('<[^>]+>','',x['type']),'sourceUrl':url})
+    return rows
+
+
 def oge_catalog():
     def load():
         params={'draw':1,'start':0,'length':100,'search[value]':'Trump','search[regex]':'false','order[0][column]':0,'order[0][dir]':'desc'}
-        for i,name in enumerate(['docDate','title','type','name','agency','position']):
+        for i,name in enumerate(['docDate','title','type','name','agency','level']):
             params.update({f'columns[{i}][data]':name,f'columns[{i}][name]':'',f'columns[{i}][searchable]':'true',f'columns[{i}][orderable]':'true',f'columns[{i}][search][value]':'',f'columns[{i}][search][regex]':'false'})
-        r=SESSION.get(OGE_API,params=params,timeout=20);r.raise_for_status();records=r.json()['data'];rows=[]
-        for x in records:
-            if 'trump'not in x.get('name','').lower():continue
-            links=re.findall(r'href=[\"\x27]([^\"\x27]+)',x.get('type',''))
-            for link in links:
-                url=html.unescape(link)
-                if url.startswith('https://extapps2.oge.gov/')and '.pdf'in url.lower():rows.append({'publicDate':x['docDate'][:10],'name':x['name'],'type':re.sub('<[^>]+>','',x['type']),'sourceUrl':url})
+        rows=[]
+        while True:
+            r=SESSION.get(OGE_API,params=params,timeout=20);r.raise_for_status()
+            payload=r.json();records=payload['data'];rows.extend(parse_oge_records(records))
+            params['start']+=len(records)
+            if not records or params['start']>=int(payload.get('recordsFiltered',len(records))):break
+        rows=sorted({x['sourceUrl']:x for x in rows}.values(),key=lambda x:(x['publicDate'],x['sourceUrl']),reverse=True)
         if not rows:raise ValueError('No official catalogue records')
         return {'reports':rows,'source':'US Office of Government Ethics','updated':now()}
-    return cached('oge-catalog',3600,load,'data-trump-catalog.json')
+    # New key avoids retaining a successful-looking v2 response from an old process.
+    return cached('oge-catalog-v3',3600,load,'data-trump-catalog.json')
 
 def trump():
     catalog=oge_catalog();data=json.loads((BASE/'data-trump-transactions.json').read_text()) if (BASE/'data-trump-transactions.json').exists() else {'rows':[]}
     return format_trump(catalog,data)
 
 def format_trump(catalog,data):
-    return dict(data,reports=catalog['reports'],catalogUpdated=catalog.get('updated'),catalogStale=catalog.get('stale',False),notice='공개된 신고 거래입니다. 제3자 독립 운용 거래가 포함될 수 있으며 트럼프 본인의 직접 투자 결정을 의미하지 않습니다. 금액은 신고 구간으로 실제 체결 금액과 다릅니다. 검증된 행만 표시하며 신규 스캔 원문은 문서 목록에서 확인할 수 있습니다.')
+    reports={x['sourceUrl']:dict(x) for x in data.get('reports',[])}
+    for x in catalog.get('reports',[]):reports[x['sourceUrl']]=dict(reports.get(x['sourceUrl'],{}),**x)
+    reports=sorted(reports.values(),key=lambda x:(x['publicDate'],x['sourceUrl']),reverse=True)
+    rows=sorted(data.get('rows',[]),key=lambda x:(x['publicDate'],x['tradeDate'],x['id']),reverse=True)
+    verified_urls={x['sourceUrl'] for x in rows}
+    pending=[x for x in reports if '278 Transaction' in x['type'] and x['sourceUrl'] not in verified_urls and x['publicDate']>=data.get('coverageStartDate','9999-12-31')]
+    latest=max((x['publicDate'] for x in reports if '278 Transaction' in x['type']),default=None)
+    return dict(data,rows=rows,reports=reports,catalogUpdated=catalog.get('updated'),catalogStale=catalog.get('stale',False),latestReportDate=latest,latestVerifiedPublicDate=max((x['publicDate'] for x in rows),default=None),latestTradeDate=max((x['tradeDate'] for x in rows),default=None),pendingReports=pending,notice='공개된 신고 거래입니다. 제3자 독립 운용 거래가 포함될 수 있으며 트럼프 본인의 직접 투자 결정을 의미하지 않습니다. 금액은 신고 구간입니다. 검증된 주요 주식 거래만 표시하며 미검증 신규 문서는 별도 안내합니다.')
