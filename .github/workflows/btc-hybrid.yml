@@ -1,0 +1,47 @@
+name: BTC September hourly priority with 15m fallback
+'on':
+  push:
+    branches:
+    - codex/btc-october-backtest
+    paths:
+    - .github/workflows/btc-hybrid.yml
+    - backtests/btc-hybrid/**
+  workflow_dispatch: null
+permissions:
+  contents: read
+  actions: read
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+    - uses: actions/checkout@v6
+    - uses: actions/setup-node@v6
+      with:
+        node-version: '22'
+    - name: Verify switching and shared-wallet accounting
+      run: node backtests/btc-hybrid/test-hybrid.cjs
+    - uses: actions/download-artifact@v4
+      with:
+        name: btc-hourly-exits
+        run-id: 39351663794
+        github-token: ${{ github.token }}
+        path: run-data/source-reference
+    - name: Prepare BTC source and baseline
+      run: 'cp run-data/source-reference/tick-output/baseline/result.json run-data/hourly-baseline.json
+
+        cp backtests/btc-hybrid/collect.py backtests/btc-hybrid/replay.cjs backtests/btc-hybrid/replay-raw.py
+        run-data/'
+    - name: Collect and verify BTC bars with equal 12-day warmup
+      working-directory: run-data
+      run: python collect.py
+    - name: Replay all September BTC raw trades in observed order
+      working-directory: run-data
+      run: python replay-raw.py
+    - uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: btc-september-hourly-15m-hybrid
+        path: run-data/
+        retention-days: 30
+        if-no-files-found: error
