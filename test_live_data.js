@@ -39,3 +39,15 @@ for(let tick=0;tick<3;tick++){bars.at(-1).close+=.01;stable.preserveViewport(()=
 assert.equal(added,identities.length);assert.equal(removed,0);assert.equal(attached,2);assert.equal(detached,0);assert.equal(priceLines,2);assert.equal(paneChanges,2);assert.equal(stable.cloud,cloud);assert.equal(stable.fibCloud,bands);assert.ok(stable.series.every((s,i)=>s===identities[i]));assert.equal(markerSets,3);assert.equal(restores,3);
 stable.preserveViewport(()=>{timeRange={from:150,to:250}},true);assert.equal(JSON.stringify(timeRange),JSON.stringify({from:100,to:200}));
 console.log('PASS: live indicators reuse series/panes/primitives and retain zoom/time range across ticks and resync.');
+// Lightweight Charts preprocesses calendar strings into BusinessDay objects in place.
+// Keep provider/source candles separate so a weekly channel survives daily/weekly ticks.
+const calendar=new Chart({replaceChildren(){}},{}),day=new Date().toISOString().slice(0,10),asBusinessDay=t=>{const [year,month,day]=t.split('-').map(Number);return {year,month,day}};
+const sourceBars=[{time:day,open:100,high:110,low:90,close:100,volume:1}];
+context.LightweightCharts={...context.LightweightCharts,CandlestickSeries:{},HistogramSeries:{},PriceScaleMode:{Normal:0,Logarithmic:1},CrosshairMode:{Normal:0},createChart:()=>({addSeries:()=>({setData:rows=>rows.forEach(r=>{r.time=asBusinessDay(r.time)}),priceScale:()=>({applyOptions(){}})}),timeScale:()=>({setVisibleLogicalRange(){}})})};
+calendar.item={tv:'BINANCE:BTCUSDT',type:'crypto'};calendar.interval='D';calendar.data={nativeBinance:true,candles:sourceBars};calendar.applyIndicators=()=>{};calendar.initLevels=()=>{};calendar.renderControls=()=>{};
+calendar.draw();assert.equal(sourceBars[0].time,day,'Initial candle drawing must not mutate the source time');
+calendar.candles={update:row=>{row.time=asBusinessDay(row.time)}};calendar.volume={update(){}};
+calendar.startLive();const dailyEvent={...event,E:Date.now(),k:{...event.k,i:'1d',t:Date.parse(day+'T00:00:00Z')}};
+callback(dailyEvent);callback({...dailyEvent,k:{...dailyEvent.k,c:'106'}});
+assert.equal(calendar.data.candles.length,1,'A calendar stream update must replace the same candle');assert.equal(calendar.data.candles[0].time,day);assert.equal(calendar.data.candles[0].close,106);
+calendar.stopLive();console.log('PASS: calendar candles remain immutable across chart drawing and live ticks; no duplicate daily bars');

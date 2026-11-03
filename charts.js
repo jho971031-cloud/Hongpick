@@ -3,7 +3,7 @@ window.HongIndicators = {
  ma(candles, period) { let sum=0;const rows=[];candles.forEach((c,i)=>{sum+=c.close;if(i>=period)sum-=candles[i-period].close;if(i>=period-1)rows.push({time:c.time,value:sum/period})});return rows; },
  rsi(candles,period=14) {let g=0,l=0;const out=[];for(let i=1;i<candles.length;i++){const d=candles[i].close-candles[i-1].close;if(i<=period){g+=Math.max(d,0);l+=Math.max(-d,0);if(i<period)continue;g/=period;l/=period}else{g=(g*(period-1)+Math.max(d,0))/period;l=(l*(period-1)+Math.max(-d,0))/period}out.push({time:candles[i].time,value:l===0?(g===0?50:100):100-100/(1+g/l)})}return out;},
  ichimoku(candles,interval='D',continuous=false) {
-  const times=candles.map(c=>c.time),minute=interval.endsWith('m');let d=new Date(minute?times.at(-1)*1000:times.at(-1)+'T12:00:00Z');for(let i=0;i<26;i++){if(minute)d=new Date(d.getTime()+parseInt(interval)*60000);else if(interval==='M')d.setUTCMonth(d.getUTCMonth()+1);else if(interval==='W')d.setUTCDate(d.getUTCDate()+7);else{do{d.setUTCDate(d.getUTCDate()+1)}while(!continuous&&[0,6].includes(d.getUTCDay()))}times.push(minute?Math.floor(d.getTime()/1000):d.toISOString().slice(0,10))}
+  const times=candles.map(c=>c.time),minute=interval.endsWith('m');let d=new Date(chartSeconds(times.at(-1))*1000);for(let i=0;i<26;i++){if(minute)d=new Date(d.getTime()+parseInt(interval)*60000);else if(interval==='M')d.setUTCMonth(d.getUTCMonth()+1);else if(interval==='W')d.setUTCDate(d.getUTCDate()+7);else{do{d.setUTCDate(d.getUTCDate()+1)}while(!continuous&&[0,6].includes(d.getUTCDay()))}times.push(minute?Math.floor(d.getTime()/1000):d.toISOString().slice(0,10))}
   const midpoint=(i,p)=>{if(i<p-1)return null;let hi=-Infinity,lo=Infinity;for(let j=i-p+1;j<=i;j++){hi=Math.max(hi,candles[j].high);lo=Math.min(lo,candles[j].low)}return(hi+lo)/2};const conversion=[],base=[],spanA=[],spanB=[],lag=[];
   candles.forEach((c,i)=>{const t=midpoint(i,9),k=midpoint(i,26),b=midpoint(i,52);if(t!=null)conversion.push({time:c.time,value:t});if(k!=null)base.push({time:c.time,value:k});if(t!=null&&k!=null)spanA.push({time:times[i+26],value:(t+k)/2});if(b!=null)spanB.push({time:times[i+26],value:b});if(i>=26)lag.push({time:times[i-26],value:c.close})});
   return {conversion,base,spanA,spanB,lag};
@@ -104,7 +104,7 @@ class IchimokuCloud {
  updateAllViews(){this.coordinates=this.points.map(p=>{const x=this.chart.timeScale().timeToCoordinate(p.time),a=this.series.priceToCoordinate(p.a),b=this.series.priceToCoordinate(p.b);return x==null||a==null||b==null?null:{x,a,b}})}
  paneViews(){return[this.view]}
 }
-const chartSeconds=t=>typeof t==='number'?t:Date.parse(t+'T00:00:00Z')/1000;
+const chartSeconds=t=>typeof t==='number'?t:typeof t==='string'?Date.parse(t+'T00:00:00Z')/1000:Date.UTC(t.year,t.month-1,t.day)/1000;
 function referencePosition(time,weekly){
  const t=chartSeconds(time),n=weekly.length;
  let lo=0,hi=n-1;while(lo<hi){const mid=Math.ceil((lo+hi)/2);if(chartSeconds(weekly[mid].time)<=t)lo=mid;else hi=mid-1}
@@ -113,7 +113,7 @@ function referencePosition(time,weekly){
 }
 // Drawing-only future coordinates; no fabricated OHLCV candles.
 function channelExtension(candles,interval,count=52,continuous=false){
- const result=candles.map(c=>({time:c.time})),minute=interval.endsWith('m');let date=new Date(minute?candles.at(-1).time*1000:candles.at(-1).time+'T12:00:00Z');
+ const result=candles.map(c=>({time:c.time})),minute=interval.endsWith('m');let date=new Date(chartSeconds(candles.at(-1).time)*1000);
  for(let i=0;i<count;i++){if(minute)date=new Date(date.getTime()+parseInt(interval)*60000);else if(interval==='M'){date.setUTCDate(1);date.setUTCMonth(date.getUTCMonth()+1)}else if(interval==='W')date.setUTCDate(date.getUTCDate()+7);else{do{date.setUTCDate(date.getUTCDate()+1)}while(!continuous&&[0,6].includes(date.getUTCDay()))}result.push({time:minute?Math.floor(date.getTime()/1000):date.toISOString().slice(0,10)})}return result;
 }
 function channelPrice(candidate,weekly,time,ratio=0){return Math.exp(Math.log(candidate.anchors[0].price)+candidate.slope*(referencePosition(time,weekly)-candidate.a)+ratio*candidate.width)}
@@ -132,7 +132,7 @@ function channelFit(candidate,reference,price,time){
  const levels=[0,.5,1,1.5,2,2.5,3].map(r=>channelPrice(candidate,reference,time,r)),distance=Math.min(...levels.map(value=>Math.abs(Math.log(value/price))));
  return {distance,useful:distance<=Math.log(1.25)&&Math.abs(candidate.width)*.5<=Math.log(candidate.scale==='major'?2.5:1.8)};
 }
-const anchorTime=time=>typeof time==='number'?formatDate(new Date(time*1000).toISOString()):time;
+const anchorTime=time=>typeof time==='number'?formatDate(new Date(time*1000).toISOString()):typeof time==='string'?time:new Date(chartSeconds(time)*1000).toISOString().slice(0,10);
 const basisLabel=frame=>({AUTO:'자동',D:'일봉',W:'주봉',M:'월봉','5m':'5분 단타','15m':'15분 단타'}[frame]||frame);
 function completedReference(data,frame){
  const today=new Date().toISOString().slice(0,10),month=today.slice(0,7);
@@ -178,15 +178,15 @@ window.HongChart=class {
    if(token!==this.token||epoch!==this.liveEpoch||!this.chart)return;const parsed=HongLive.candle(message,interval);if(!parsed||parsed.symbol!==symbol)return;
    if(syncing){pending=message;return}const row=parsed.row,last=this.data.candles.at(-1);
    if(chartSeconds(row.time)<chartSeconds(last.time))return;
-   if(row.time===last.time)this.data.candles[this.data.candles.length-1]=row;else this.data.candles.push(row);
+   if(chartSeconds(row.time)===chartSeconds(last.time))this.data.candles[this.data.candles.length-1]=row;else this.data.candles.push(row);
    this.data.updated=parsed.updated;this.data.lastBar=row.time;this.data.formingTime=parsed.closed?null:row.time;this.data.stale=false;this.lastLive=parsed.updated;this.liveMode='실시간';seen=true;
-   this.preserveViewport(()=>{this.candles.update(row);this.volume.update({time:row.time,value:row.volume,color:row.close>=row.open?'#16d79b38':'#ff526d38'})});
+   this.preserveViewport(()=>{this.candles.update({...row});this.volume.update({time:row.time,value:row.volume,color:row.close>=row.open?'#16d79b38':'#ff526d38'})});
    if(!this.liveIndicatorTimer)this.liveIndicatorTimer=setTimeout(()=>{this.liveIndicatorTimer=null;if(token===this.token&&epoch===this.liveEpoch&&this.chart)this.preserveViewport(()=>this.applyIndicators(true))},3000);
    this.renderLiveSource();
   };
   this.liveClient=HongLive.subscribe([symbol.toLowerCase()+'@kline_'+HongLive.frame[interval]],apply,async status=>{
    if(token!==this.token||epoch!==this.liveEpoch)return;
-   if(status.mode==='connecting'&&(seen||Date.now()-Date.parse(this.data.updated)>15000)&&!syncing){syncing=true;try{const fresh=await HongData.binanceBars(this.item.tv,interval);if(token!==this.token||epoch!==this.liveEpoch||!this.chart)return;this.preserveViewport(()=>{this.data=fresh;this.candles.setData(fresh.candles);this.volume.setData(fresh.candles.map(c=>({time:c.time,value:c.volume,color:c.close>=c.open?'#16d79b38':'#ff526d38'})));this.applyIndicators(true)},true)}catch{this.liveMode='복구 대기 · 이전 수신값'}finally{syncing=false;if(pending){const p=pending;pending=null;apply(p)}}}
+   if(status.mode==='connecting'&&(seen||Date.now()-Date.parse(this.data.updated)>15000)&&!syncing){syncing=true;try{const fresh=await HongData.binanceBars(this.item.tv,interval);if(token!==this.token||epoch!==this.liveEpoch||!this.chart)return;this.preserveViewport(()=>{this.data=fresh;this.candles.setData(fresh.candles.map(row=>({...row})));this.volume.setData(fresh.candles.map(c=>({time:c.time,value:c.volume,color:c.close>=c.open?'#16d79b38':'#ff526d38'})));this.applyIndicators(true)},true)}catch{this.liveMode='복구 대기 · 이전 수신값'}finally{syncing=false;if(pending){const p=pending;pending=null;apply(p)}}}
    if(status.mode!=='receiving')this.liveMode={connecting:'연결 중',reconnecting:'재연결 중 · 이전 수신값',paused:'일시정지 · 이전 수신값'}[status.mode]||'수집본';
    if(this.item?.tv.startsWith('BINANCE:'))this.renderLiveSource();
   });
@@ -197,7 +197,7 @@ window.HongChart=class {
   if(before&&JSON.stringify(before)!==JSON.stringify(after)){if(byTime)scale.setVisibleRange(before);else scale.setVisibleLogicalRange(before)}
   return result;
  }
- draw(){const last=this.data.candles.at(-1)?.close||1,precision=this.item?.type==='crypto'?Math.min(12,Math.max(2,4-Math.floor(Math.log10(last)))):2;this.priceFormat={type:'price',precision,minMove:10**-precision};this.destroy();this.element.replaceChildren();const L=LightweightCharts;this.chart=L.createChart(this.element,{autoSize:true,layout:{background:{color:'#111317'},textColor:'#959ba5',attributionLogo:true,panes:{separatorColor:'#2b2e35'}},grid:{vertLines:{color:'#202329'},horzLines:{color:'#202329'}},rightPriceScale:{borderColor:'#2b2e35',mode:this.options.fib==='off'?L.PriceScaleMode.Normal:L.PriceScaleMode.Logarithmic},timeScale:{borderColor:'#2b2e35',rightOffset:4,shiftVisibleRangeOnNewBar:false,allowShiftVisibleRangeOnWhitespaceReplacement:false,timeVisible:this.interval.endsWith('m'),secondsVisible:false},localization:{locale:'ko-KR'},crosshair:{mode:L.CrosshairMode.Normal}});this.candles=this.chart.addSeries(L.CandlestickSeries,{priceFormat:this.priceFormat,upColor:'#16d79b',downColor:'#ff526d',borderVisible:false,wickUpColor:'#16d79b',wickDownColor:'#ff526d'});this.candles.setData(this.data.candles);this.candles.priceScale().applyOptions({scaleMargins:{top:0.08,bottom:0.2}});this.volume=this.chart.addSeries(L.HistogramSeries,{priceFormat:{type:'volume'},priceScaleId:'volume',lastValueVisible:false,priceLineVisible:false});this.volume.setData(this.data.candles.map(c=>({time:c.time,value:c.volume,color:c.close>=c.open?'#16d79b38':'#ff526d38'})));this.volume.priceScale().applyOptions({scaleMargins:{top:0.82,bottom:0}});this.applyIndicators();const count=this.data.candles.length,from=this.fibCandidate&&this.interval===this.fibBasis?Math.max(0,this.fibCandidate.zone.from-16):Math.max(0,count-120);this.chart.timeScale().setVisibleLogicalRange({from,to:count+(this.fibCandidate?18:5)});this.initLevels();}
+ draw(){const last=this.data.candles.at(-1)?.close||1,precision=this.item?.type==='crypto'?Math.min(12,Math.max(2,4-Math.floor(Math.log10(last)))):2;this.priceFormat={type:'price',precision,minMove:10**-precision};this.destroy();this.element.replaceChildren();const L=LightweightCharts;this.chart=L.createChart(this.element,{autoSize:true,layout:{background:{color:'#111317'},textColor:'#959ba5',attributionLogo:true,panes:{separatorColor:'#2b2e35'}},grid:{vertLines:{color:'#202329'},horzLines:{color:'#202329'}},rightPriceScale:{borderColor:'#2b2e35',mode:this.options.fib==='off'?L.PriceScaleMode.Normal:L.PriceScaleMode.Logarithmic},timeScale:{borderColor:'#2b2e35',rightOffset:4,shiftVisibleRangeOnNewBar:false,allowShiftVisibleRangeOnWhitespaceReplacement:false,timeVisible:this.interval.endsWith('m'),secondsVisible:false},localization:{locale:'ko-KR'},crosshair:{mode:L.CrosshairMode.Normal}});this.candles=this.chart.addSeries(L.CandlestickSeries,{priceFormat:this.priceFormat,upColor:'#16d79b',downColor:'#ff526d',borderVisible:false,wickUpColor:'#16d79b',wickDownColor:'#ff526d'});this.candles.setData(this.data.candles.map(row=>({...row})));this.candles.priceScale().applyOptions({scaleMargins:{top:0.08,bottom:0.2}});this.volume=this.chart.addSeries(L.HistogramSeries,{priceFormat:{type:'volume'},priceScaleId:'volume',lastValueVisible:false,priceLineVisible:false});this.volume.setData(this.data.candles.map(c=>({time:c.time,value:c.volume,color:c.close>=c.open?'#16d79b38':'#ff526d38'})));this.volume.priceScale().applyOptions({scaleMargins:{top:0.82,bottom:0}});this.applyIndicators();const count=this.data.candles.length,from=this.fibCandidate&&this.interval===this.fibBasis?Math.max(0,this.fibCandidate.zone.from-16):Math.max(0,count-120);this.chart.timeScale().setVisibleLogicalRange({from,to:count+(this.fibCandidate?18:5)});this.initLevels();}
  applyIndicators(streamUpdate=false){
   if(!this.chart)return;
   const updating=streamUpdate,used=new Set();

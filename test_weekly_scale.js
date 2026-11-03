@@ -1,8 +1,10 @@
 /* Weekly display scale must use real major anchors without changing signal/scalp rules. */
 const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
 const box={window:{},formatDate:x=>x,escapeHtml:x=>x,setTimeout,clearTimeout};vm.createContext(box);
-vm.runInContext(fs.readFileSync('charts.js','utf8')+'\nthis.project=channelProjection;',box);
+vm.runInContext(fs.readFileSync('charts.js','utf8')+'\nthis.project=channelProjection;this.seconds=chartSeconds;this.extend=channelExtension;',box);
 const indicators=box.window.HongIndicators;
+assert.equal(box.seconds({year:2026,month:11,day:2}),box.seconds('2026-11-02'));
+assert.equal(box.extend([{time:{year:2026,month:11,day:2}}],'W',2,true).at(-1).time,'2026-11-16');
 const turns=[[0,130],[38,170],[44,185],[60,200],[82,100],[100,115],[115,90],[140,145],[157,85],[170,149],[182,170],[210,240],[225,180],[260,190],[299,185]];
 const bars=Array.from({length:300},(_,i)=>{const next=turns.findIndex(p=>p[0]>=i),right=turns[next],left=turns[Math.max(0,next-1)],close=left[0]===right[0]?right[1]:left[1]+(right[1]-left[1])*(i-left[0])/(right[0]-left[0]);return {time:new Date(Date.UTC(2020,0,6)+i*7*86400000).toISOString().slice(0,10),open:close*.99,high:close*1.02,low:close*.95,close,volume:100};});
 const original=JSON.stringify(bars),large=indicators.fibonacci(bars,'high',{interval:'W',scale:'major',currentPrice:bars.at(-1).close});
