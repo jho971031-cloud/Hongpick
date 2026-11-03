@@ -52,17 +52,20 @@ window.HongIndicators = {
  },
  fibonacci(candles,mode='high',settings={}) {
   if(['5m','15m'].includes(settings.interval))return this.intradayFibonacci(candles,mode,settings);
-  const frame=settings.interval||'W',daily=frame==='D',monthly=frame==='M',near=monthly?1:settings.early?1:3,major=monthly?2:8,minBars=monthly?18:60,minGap=monthly?3:daily?20:26,maxGap=monthly?24:daily?252:208,touchLookback=monthly?6:26,touchSpread=monthly?2:daily?5:8,minTouches=monthly?2:3,retrace=daily?.08:.15,minSwing=daily?.18:monthly?.20:.30;
+  const frame=settings.interval||'W',daily=frame==='D',monthly=frame==='M',large=frame==='W'&&settings.scale==='major',near=monthly?1:settings.early?1:3,minBars=monthly?18:60,minGap=monthly?3:daily?20:large?52:26,maxGap=monthly?24:daily?252:large?416:208,touchLookback=monthly?6:large?52:26,touchSpread=monthly?2:daily?5:large?13:8,minTouches=monthly?2:3,retrace=daily?.08:.15,minSwing=daily?.18:monthly?.20:large?.35:.30;
   if(!['high','low'].includes(mode)||candles.length<minBars)return null;
   const source=candles,rows=mode==='low'?source.map(c=>({...c,open:1/c.open,high:1/c.low,low:1/c.high,close:1/c.close})):source,n=rows.length;
+  // Chart-only major weekly scale: broader structural base, actual anchor prices unchanged.
+  const weeklyRanges=large?rows.slice(-52).map((x,j,a)=>{const prev=a[Math.max(0,j-1)].close;return Math.max(Math.log(x.high/x.low),Math.abs(Math.log(x.high/prev)),Math.abs(Math.log(x.low/prev)))}).sort((a,b)=>a-b):[];
+  const weeklyNoise=large?weeklyRanges[Math.floor(weeklyRanges.length/2)]:0,zoneDepth=large?Math.max(.08,Math.min(.18,weeklyNoise*1.5)):.06;
   const piv=[];for(let i=near;i<n-near-1;i++)if(rows[i].high===Math.max(...rows.slice(i-near,i+near+1).map(x=>x.high)))piv.push(i);
   const found=[];
   for(const b of piv){
    // A structural rebound high may be followed by several smaller pivots.
    // Keep the last significant resistance before the sustained reversal.
-   const prominence=monthly?1:daily?5:8;
+   const prominence=monthly?1:daily?5:large?13:8;
    if(b<prominence||b+prominence>=n||rows[b].high<Math.max(...rows.slice(b-prominence,b+prominence+1).map(x=>x.high))*.995)continue;
-   let turn=null;const wait=monthly?12:daily?100:52;
+   let turn=null;const wait=monthly?12:daily?100:large?104:52;
    for(let i=b+2;i<Math.min(b+wait,n-1);i++){
     if(rows[i].close>rows[b].high*1.01&&rows[i+1].close>rows[b].high*1.01){turn=i;break}
    }
@@ -74,22 +77,24 @@ window.HongIndicators = {
    const cs=piv.filter(i=>i>turn+1&&i>=peakWindow&&i+peakWindow<n&&rows[i].high===Math.max(...rows.slice(i-peakWindow,i+peakWindow+1).map(x=>x.high))&&Math.min(...rows.slice(i+1,i+peakWindow+1).map(x=>x.low))<=rows[i].high*(1-retrace));
    if(!cs.length)continue;const c=cs[0];if(c-turn>(monthly?12:65))continue;
    for(const a of piv){
-    if(b-a<minGap||b-a>maxGap||rows[b].high>=rows[a].high*.98)continue;
+    if(b-a<minGap||b-a>maxGap||large&&c-a<104||rows[b].high>=rows[a].high*.98)continue;
     if(rows[a].high<Math.max(...rows.slice(Math.max(0,a-(monthly?12:52)),a+1).map(x=>x.high))*.98)continue;
     if(Math.max(...rows.slice(a+1,b+1).map(x=>x.high))>rows[a].high*1.05)continue;
-    const ceiling=rows[a].high,touches=[];for(let i=Math.max(0,a-touchLookback);i<=a;i++)if(rows[i].high>=ceiling*.94&&rows[i].high<=ceiling*1.01)touches.push(i);
+    const ceiling=rows[a].high,touches=[];for(let i=Math.max(0,a-touchLookback);i<=a;i++)if(rows[i].high>=ceiling*(1-zoneDepth)&&rows[i].high<=ceiling*1.01)touches.push(i);
     if(touches.length<minTouches||touches.at(-1)-touches[0]<touchSpread)continue;
     const swing=1-Math.min(...rows.slice(a+1,b+1).map(x=>x.low))/ceiling;if(swing<minSwing)continue;
-    let slope=(Math.log(rows[b].high)-Math.log(ceiling))/(b-a),width=Math.log(rows[c].high)-Math.log(ceiling)-slope*(c-a);if(width<=0)continue;
-    let zone={from:touches[0],to:touches.at(-1),floor:ceiling*.94,ceiling:ceiling*1.01};
+    let slope=(Math.log(rows[b].high)-Math.log(ceiling))/(b-a),width=Math.log(rows[c].high)-Math.log(ceiling)-slope*(c-a);if(width<=0||large&&width<Math.max(Math.log(1.12),weeklyNoise*2))continue;
+    let zone={from:touches[0],to:touches.at(-1),floor:ceiling*(1-zoneDepth),ceiling:ceiling*1.01};
     if(mode==='low'){slope=-slope;width=-width;zone={from:zone.from,to:zone.to,floor:1/zone.ceiling,ceiling:1/zone.floor}}
-    found.push({mode,a,b,c,turn,slope,width,zone,...(settings.early?{active:true,provisional:c+fullPeakWindow>=n}:{}),score:swing*100+Math.min(b-a,156)*.12+touches.length*.5-(n-1-c)*(daily?.06:monthly?1:.3),anchors:[a,b,c].map((index,j)=>({point:j+1,index,time:source[index].time,price:mode==='high'?source[index].high:source[index].low}))});
+    found.push({mode,a,b,c,turn,slope,width,zone,...(large?{scale:'major'}:{}),...(settings.early?{active:true,provisional:c+fullPeakWindow>=n}:{}),score:swing*100+Math.min(b-a,large?416:156)*(large?.18:.12)+touches.length*.5+(large?Math.min(touches.at(-1)-touches[0],52)*.35:0)-(n-1-c)*(daily?.06:monthly?1:large?.15:.3),anchors:[a,b,c].map((index,j)=>({point:j+1,index,time:source[index].time,price:mode==='high'?source[index].high:source[index].low}))});
    }
   }
   const final=new Map();for(const x of found){const key=x.a+':'+x.c,old=final.get(key);if(!old||x.b>old.b)final.set(key,x)}
   const candidates=[...final.values()];
-  if(frame!=='W'&&settings.currentPrice>0)for(const x of candidates){const fit=channelFit(x,source,settings.currentPrice,source.at(-1).time);x.score-=fit.distance*100+Math.abs(x.width)*20;x.score+=x.c*.10}
-  return candidates.sort((a,b)=>b.score-a.score)[0]||null;
+  if((frame!=='W'||large)&&settings.currentPrice>0)for(const x of candidates){const fit=channelFit(x,source,settings.currentPrice,source.at(-1).time);x.score-=fit.distance*(large?140:100)+Math.abs(x.width)*(large?8:20);x.score+=x.c*(large?.02:.10)}
+  if(large&&!candidates.length){const fallback=this.fibonacci(candles,mode,{...settings,scale:'standard'});return fallback?{...fallback,scale:'standard-fallback'}:null;}
+  const nearPrice=large&&settings.currentPrice>0?candidates.filter(x=>channelFit(x,source,settings.currentPrice,source.at(-1).time).useful):[];
+  return (nearPrice.length?nearPrice:candidates).sort((a,b)=>b.score-a.score)[0]||null;
  }
 };
 class IchimokuCloud {
@@ -125,7 +130,7 @@ function channelProjection(candidate,points){
 function channelFit(candidate,reference,price,time){
  if(!candidate||!reference?.length||!(price>0))return {useful:false,distance:Infinity};
  const levels=[0,.5,1,1.5,2,2.5,3].map(r=>channelPrice(candidate,reference,time,r)),distance=Math.min(...levels.map(value=>Math.abs(Math.log(value/price))));
- return {distance,useful:distance<=Math.log(1.25)&&Math.abs(candidate.width)*.5<=Math.log(1.8)};
+ return {distance,useful:distance<=Math.log(1.25)&&Math.abs(candidate.width)*.5<=Math.log(candidate.scale==='major'?2.5:1.8)};
 }
 const anchorTime=time=>typeof time==='number'?formatDate(new Date(time*1000).toISOString()):time;
 const basisLabel=frame=>({AUTO:'자동',D:'일봉',W:'주봉',M:'월봉','5m':'5분 단타','15m':'15분 단타'}[frame]||frame);
@@ -153,7 +158,7 @@ window.HongChart=class {
  if(wantsFib&&!scalp&&this.channelSelection?.key===selectionKey){({reference:selected,frame:selectedFrame,candidate,reason}=this.channelSelection)}
  else if(wantsFib){
   const frames=this.options.fibFrame==='AUTO'?['W','D']: [this.options.fibFrame],price=viewing.candles.at(-1).close,time=viewing.candles.at(-1).time;
-  for(const frame of frames){try{const reference=await getReference(frame),found=HongIndicators.fibonacci(reference.candles,this.options.fib,{interval:frame,currentPrice:['5m','15m'].includes(frame)&&interval!==frame?reference.candles.at(-1)?.close:price});
+  for(const frame of frames){try{const reference=await getReference(frame),found=HongIndicators.fibonacci(reference.candles,this.options.fib,{interval:frame,...(frame==='W'?{scale:'major'}:{}),currentPrice:['5m','15m'].includes(frame)&&interval!==frame?reference.candles.at(-1)?.close:price});
    if(this.options.fibFrame==='AUTO'&&frame==='W'&&!channelFit(found,reference.candles,price,time).useful){reason=found?'주봉 채널이 현재가에서 멀어 일봉으로 전환':'주봉 후보가 없어 일봉으로 전환';continue}
    selected=reference;selectedFrame=frame;candidate=found;break;
   }catch(error){reason=basisLabel(frame)+' 데이터 없음';if(this.options.fibFrame!=='AUTO')break}}
@@ -221,7 +226,7 @@ window.HongChart=class {
     if(this.fibMarkers)this.fibMarkers.setMarkers(markers);else this.fibMarkers=L.createSeriesMarkers(this.candles,markers);
 
     if(this.fibCloud){this.fibCloud.candles=extended;this.fibCloud.candidate=candidate;this.fibCloud.priceAt=priceAt;this.fibCloud.requestUpdate?.()}else{this.fibCloud=new FibonacciBands(extended,candidate,priceAt);this.candles.attachPrimitive(this.fibCloud)}
-    this.fibStatus=(this.fibReason?this.fibReason+' · ':'')+(this.options.fib==='high'?'고–고–고':'저–저–저')+' · 오른쪽 연장 · ① '+anchorTime(candidate.anchors[0].time)+' · ② '+anchorTime(candidate.anchors[1].time)+' · 변곡 '+anchorTime(this.referenceData.candles[candidate.turn].time)+' · ③ '+anchorTime(candidate.anchors[2].time)+(candidate.active?' · 수집 기준 진행 구간'+(candidate.provisional?' · ③ 잠정':' · ③ 반전 확인'):'');
+    this.fibStatus=(this.fibReason?this.fibReason+' · ':'')+(candidate.scale==='major'?'큰 주봉 흐름 · ':candidate.scale==='standard-fallback'?'큰 구조 미충족 · 기존 주봉 · ':'')+(this.options.fib==='high'?'고–고–고':'저–저–저')+' · 오른쪽 연장 · ① '+anchorTime(candidate.anchors[0].time)+' · ② '+anchorTime(candidate.anchors[1].time)+' · 변곡 '+anchorTime(this.referenceData.candles[candidate.turn].time)+' · ③ '+anchorTime(candidate.anchors[2].time)+(candidate.active?' · 수집 기준 진행 구간'+(candidate.provisional?' · ③ 잠정':' · ③ 반전 확인'):'');
    }else{if(this.fibCloud){this.candles.detachPrimitive(this.fibCloud);this.fibCloud=null}if(this.fibMarkers){this.candles.detachPrimitive(this.fibMarkers);this.fibMarkers=null}this.fibStatus=(this.fibReason?this.fibReason+' · ':'')+basisLabel(this.fibBasis||this.options.fibFrame)+' 기준에서 조건을 충족하는 후보가 없습니다.';}
   }
   if(this.options.rsi){const rsi=HongIndicators.rsi(this.data.candles),series=add(rsi,'#b58eff',1,{priceScaleId:'right',priceFormat:{type:'price',precision:1,minMove:.1},lastValueVisible:true});if(!updating){series.priceScale().applyOptions({mode:L.PriceScaleMode.Normal,autoScale:true,scaleMargins:{top:.12,bottom:.12}});series.applyOptions({autoscaleInfoProvider:(base)=>{const range=base()?.priceRange;return {priceRange:{minValue:Math.min(20,range?.minValue??20),maxValue:Math.max(80,range?.maxValue??80)}}}});for(const value of [30,70])series.createPriceLine({price:value,color:'#71899c',lineWidth:1,lineStyle:2,axisLabelVisible:true,title:''});const panes=this.chart.panes();panes[0].setStretchFactor(4);panes[1].setStretchFactor(1.5)}}
@@ -278,7 +283,7 @@ window.HongChart=class {
   if(this.expandedTool==='sr'||!this.expandedTool||!this.panelDraft)return;
   const d=this.panelDraft,ma=this.expandedTool==='ma',panel=document.createElement('section');panel.className='indicator-settings';panel.dataset.settingsPanel='';panel.setAttribute('aria-label',ma?'이동평균선 설정':'자동 빗각 설정');
   const checks=(values,group,selected)=>values.map(([value,label])=>'<label><input type="checkbox" data-group="'+group+'" value="'+value+'" '+(selected(value)?'checked':'')+'> '+label+'</label>').join('');
-  panel.innerHTML='<div class="settings-head"><b>'+(ma?'이동평균선':'자동 빗각 · 단타 / 장기')+'</b><button data-close-settings aria-label="설정 접기">접기 ▴</button></div>'+(ma?'<fieldset><legend>기간 · 여러 개 선택 가능</legend><div class="settings-checks">'+checks([20,60,120,200].map(p=>[String(p),'MA '+p]),'ma',v=>d.ma.has(+v))+'</div></fieldset>':'<label class="settings-enable"><input type="checkbox" data-enable '+(d.enabled?'checked':'')+'> 자동 빗각 표시</label><fieldset><legend>작도 기준 봉 · 하나 선택</legend><div class="settings-checks">'+checks(['5m','15m','AUTO','W','D','M'].map(f=>[f,basisLabel(f)]),'frame',v=>d.frame===v)+'</div></fieldset><fieldset><legend>기준점 방향 · 하나 선택</legend><div class="settings-checks">'+checks([['high','고–고–고'],['low','저–저–저']],'mode',v=>d.mode===v)+'</div></fieldset><small class="data-source">① → ② → 변곡 → ③ 순서 유지. 5분·15분 단타는 최근 완료된 240봉에서 진행 구간을 탐색하며, 미확정 ③은 잠정 표시합니다. 새 봉 수집 시 재탐색하고 다른 봉으로 전환해도 작도 기준을 유지합니다. 자동은 주봉 → 일봉 순서입니다.</small>')+'<small class="data-source settings-instant">체크하면 즉시 적용됩니다.</small>';
+  panel.innerHTML='<div class="settings-head"><b>'+(ma?'이동평균선':'자동 빗각 · 단타 / 장기')+'</b><button data-close-settings aria-label="설정 접기">접기 ▴</button></div>'+(ma?'<fieldset><legend>기간 · 여러 개 선택 가능</legend><div class="settings-checks">'+checks([20,60,120,200].map(p=>[String(p),'MA '+p]),'ma',v=>d.ma.has(+v))+'</div></fieldset>':'<label class="settings-enable"><input type="checkbox" data-enable '+(d.enabled?'checked':'')+'> 자동 빗각 표시</label><fieldset><legend>작도 기준 봉 · 하나 선택</legend><div class="settings-checks">'+checks(['5m','15m','AUTO','W','D','M'].map(f=>[f,basisLabel(f)]),'frame',v=>d.frame===v)+'</div></fieldset><fieldset><legend>기준점 방향 · 하나 선택</legend><div class="settings-checks">'+checks([['high','고–고–고'],['low','저–저–저']],'mode',v=>d.mode===v)+'</div></fieldset><small class="data-source">① → ② → 변곡 → ③ 순서 유지. 5분·15분 단타는 최근 완료된 240봉에서 진행 구간을 탐색하며, 미확정 ③은 잠정 표시합니다. 새 봉 수집 시 재탐색하고 다른 봉으로 전환해도 작도 기준을 유지합니다. 주봉은 ①–② 최소 1년, ①–③ 최소 2년의 큰 구조와 최대 1년의 매물 구간을 우선합니다. 큰 구조가 없으면 기존 주봉을 사용하며 자동은 주봉 → 일봉 순서입니다.</small>')+'<small class="data-source settings-instant">체크하면 즉시 적용됩니다.</small>';
   this.controls.querySelector('.indicator-buttons').after(panel);
   const close=()=>{this.expandedTool=null;this.panelDraft=null;this.renderControls()};panel.querySelector('[data-close-settings]').onclick=close;
   panel.querySelectorAll('[data-group]').forEach(input=>input.onchange=()=>{const group=input.dataset.group;if(group==='ma'){input.checked?d.ma.add(+input.value):d.ma.delete(+input.value);this.options.ma=new Set(d.ma);this.applyIndicators();this.renderControls()}else{d[group]=input.value;d.enabled=true;this.commitFibSettings(d)}});
@@ -288,7 +293,7 @@ window.HongChart=class {
   this.options.fib=d.enabled?d.mode:'off';this.options.fibFrame=d.frame;this.channelSelection=null;
   this.lastScalpRefreshBucket=Math.floor(Date.now()/(parseInt(d.frame)*60000||900000));
   if(this.chart&&this.data&&(!d.enabled||this.fibBasis===d.frame&&this.referenceData)){
-   if(d.enabled)this.selectedCandidate=HongIndicators.fibonacci(this.referenceData.candles,d.mode,{interval:d.frame,currentPrice:this.interval===d.frame?this.data.candles.at(-1).close:this.referenceData.candles.at(-1)?.close});
+   if(d.enabled)this.selectedCandidate=HongIndicators.fibonacci(this.referenceData.candles,d.mode,{interval:d.frame,...(d.frame==='W'?{scale:'major'}:{}),currentPrice:this.interval===d.frame?this.data.candles.at(-1).close:this.referenceData.candles.at(-1)?.close});
    this.chart.priceScale('right').applyOptions({mode:d.enabled?LightweightCharts.PriceScaleMode.Logarithmic:LightweightCharts.PriceScaleMode.Normal});this.applyIndicators();this.renderControls();
   }else{if(['5m','15m'].includes(d.frame)&&d.enabled)this.interval=d.frame;this.load(this.item)}
  }
