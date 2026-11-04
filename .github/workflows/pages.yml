@@ -31,6 +31,8 @@ jobs:
           node test_hongpicks.js
           node test_live_data.js
           node test_weekly_scale.js
+          node test_hourly.js
+          python -m unittest -v test_intraday_hours.py
       - uses: actions/cache@v4
         with:
           path: .snapshot-cache
@@ -57,4 +59,5 @@ jobs:
       - name: Deploy GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+
 

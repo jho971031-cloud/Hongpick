@@ -17,7 +17,7 @@ async function api(path){
  return HongData.api(path);
 }
 let chartScripts;
-function ensureCharts(){if(!chartScripts)chartScripts=(async()=>{for(const name of ['fib-client.js?v=6.4.2','lightweight-charts.js','scenario.js?v=6.9.0','charts.js?v=6.9.5','levels.js?v=6.9.0'])await new Promise((resolve,reject)=>{const script=document.createElement('script');script.src=HongData.asset(name);script.onload=resolve;script.onerror=()=>{script.remove();reject(Error('차트 모듈을 불러오지 못했습니다.'))};document.head.append(script)})})().catch(error=>{chartScripts=null;throw error});return chartScripts}
+function ensureCharts(){if(!chartScripts)chartScripts=(async()=>{for(const name of ['fib-client.js?v=6.4.2','lightweight-charts.js','scenario.js?v=6.9.0','charts.js?v=6.10.0','levels.js?v=6.9.0'])await new Promise((resolve,reject)=>{const script=document.createElement('script');script.src=HongData.asset(name);script.onload=resolve;script.onerror=()=>{script.remove();reject(Error('차트 모듈을 불러오지 못했습니다.'))};document.head.append(script)})})().catch(error=>{chartScripts=null;throw error});return chartScripts}
 function notice(root,text){root.innerHTML='<div class="empty">'+escapeHtml(text)+'</div>'}
 function source(d){return `${d.source||''}${d.kind||/13F|OGE|CNN|Fear|Alternative/.test(d.source||'')?'':' · 지연·주기 수집'} · 기준시각 ${formatDate(d.updated)}${d.stale?' · 이전 데이터':''}`}
 const pages=['menu','hongpicks','codexpicks','home','search','coins','gurus','turnover','fng','trump','watchlist'];
@@ -219,7 +219,18 @@ document.addEventListener('click',e=>{const button=e.target.closest('[data-pick-
 document.querySelector('.brand').addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();show('home')}});
 
 
-setInterval(()=>{if(document.hidden||document.querySelector('.modal-back'))return;for(const c of Object.values(charts)){const bucket=Math.floor(Date.now()/(parseInt(c.options.fibFrame)*60000||900000));if(['5m','15m'].includes(c.options.fibFrame)&&!c.expandedTool&&c.options.fib!=='off'&&(c.fullscreenState||c.element.closest('.page.active'))&&c.lastScalpRefreshBucket!==bucket){c.lastScalpRefreshBucket=bucket;c.refreshScalp()}}},60000);
+setInterval(()=>{
+ if(document.hidden||document.querySelector('.modal-back'))return;
+ for(const c of Object.values(charts)){
+  const frame=c.options.fibFrame;if(!['5m','15m','1h','4h'].includes(frame)||c.expandedTool||c.options.fib==='off'||!(c.fullscreenState||c.element.closest('.page.active')))continue;
+  const duration=parseInt(frame)*(frame.endsWith('h')?3600000:60000),ref=c.referenceData?.candles?.at(-1)?.time,offset=typeof ref==='number'?(ref*1000)%duration:0,now=Date.now(),bucket=Math.floor((now-offset)/duration),within=(now-offset)%duration;
+  // A delayed stock provider can return its cached pre-close bar for up to two minutes.
+  const retryClose=frame.endsWith('h')&&within<180000&&now-(c.lastScalpRefreshAt||0)>=60000;
+  if(c.lastScalpRefreshBucket===bucket&&!retryClose)continue;
+  c.lastScalpRefreshBucket=bucket;c.lastScalpRefreshAt=now;
+  Promise.resolve(c.refreshScalp()).catch(()=>{c.lastScalpRefreshBucket=null;c.fibStatus='새 봉 갱신 실패 · 기존 채널을 유지합니다.';c.renderControls()});
+ }
+},60000);
 
 $('picksEntryOnly').onchange=e=>{picksEntryOnly=e.target.checked;renderPicks()};document.addEventListener('click',e=>{if(e.target.closest('[data-show-entries]')){picksEntryOnly=true;$('picksEntryOnly').checked=true;show('hongpicks');renderPicks()}});
 $('picksOversold').onchange=e=>{picksOversold=e.target.checked;renderPicks()};
@@ -252,4 +263,5 @@ function syncLiveQuotes(){
   if(accepted){coinLiveState='실시간 수신';if(!livePaintTimer)livePaintTimer=setTimeout(()=>{livePaintTimer=null;paintLiveCoins()},1000)}
  },status=>{if(status.mode!=='receiving'){coinLiveState={connecting:'연결 중',reconnecting:'재연결 중 · 수집본/이전 시세',paused:'일시정지 · 이전 시세'}[status.mode]||'수집본';paintLiveCoins()}});
 }
+
 

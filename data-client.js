@@ -39,9 +39,9 @@ window.HongData=(()=>{
   found.sort((a,b)=>a.score-b.score||a.x.ticker.length-b.x.ticker.length||a.x.ticker.localeCompare(b.x.ticker));return {results:found.slice(0,30).map(v=>v.x),source:d.source};
  }
  async function binanceBars(tv,frame='D'){
-  const symbol=tv.split(':').at(-1),interval={D:'1d',W:'1w',M:'1M','1m':'1m','5m':'5m','15m':'15m'}[frame];if(!/^[A-Z0-9]{1,30}USDT$/.test(symbol)||!interval)throw Error('지원하지 않는 바이낸스 심볼');
+  const symbol=tv.split(':').at(-1),interval={D:'1d',W:'1w',M:'1M','1m':'1m','5m':'5m','15m':'15m','1h':'1h','4h':'4h'}[frame];if(!/^[A-Z0-9]{1,30}USDT$/.test(symbol)||!interval)throw Error('지원하지 않는 바이낸스 심볼');
   const raw=await json(new URL('https://data-api.binance.vision/api/v3/klines?symbol='+symbol+'&interval='+interval+'&limit=1000'),10000);
-  const candles=raw.map(x=>({time:frame.endsWith('m')?Math.floor(x[0]/1000):new Date(x[0]).toISOString().slice(0,10),open:Number(x[1]),high:Number(x[2]),low:Number(x[3]),close:Number(x[4]),volume:Number(x[5])})).filter(x=>[x.open,x.high,x.low,x.close,x.volume].every(Number.isFinite)&&x.low>0);
+  const candles=raw.map(x=>({time:/^(?:1m|5m|15m|1h|4h)$/.test(frame)?Math.floor(x[0]/1000):new Date(x[0]).toISOString().slice(0,10),open:Number(x[1]),high:Number(x[2]),low:Number(x[3]),close:Number(x[4]),volume:Number(x[5])})).filter(x=>[x.open,x.high,x.low,x.close,x.volume].every(Number.isFinite)&&x.low>0);
   if(candles.length<2)throw Error('바이낸스 캔들 데이터 부족');return {candles,interval:frame,source:'Binance Spot '+interval+' OHLCV',updated:new Date().toISOString(),lastBar:candles.at(-1).time,formingTime:raw.at(-1)[6]>=Date.now()?candles.at(-1).time:null,nativeBinance:true,exchangeTimezone:'UTC',delivery:'REST 수신 · 스트리밍 연결 전'};
  }
  function aggregate(data,interval){
@@ -62,6 +62,12 @@ window.HongData=(()=>{
  async function api(path){
   const url=new URL(path,location.origin),route=url.pathname.slice(5),q=url.searchParams;
   if(route==='coins'&&q.get('kind')==='search')return coinSearch(q.get('q')||'');
+  if(route==='history'&&['1m','5m','15m','1h','4h'].includes(q.get('interval'))){
+   const symbol=q.get('symbol'),interval=q.get('interval');
+   if(symbol?.startsWith('BINANCE:')){try{return await binanceBars(symbol,interval)}catch(error){if(staticMode&&!fallback)throw error}}
+   if(staticMode&&!fallback)throw Error('이 시간봉은 API 보완을 켜야 볼 수 있습니다.');
+   return json(new URL('/api/intraday?symbol='+encodeURIComponent(symbol)+'&interval='+interval,apiBase),10000);
+  }
   if(!staticMode){if(route==='history'){const dailyPath='/api/history?symbol='+encodeURIComponent(q.get('symbol'))+'&interval=D';return aggregate(await json(new URL(dailyPath,apiBase),900000),q.get('interval')||'D')}return json(new URL(path,apiBase),['gurus','trump'].includes(route)?3600000:90000)}
   if(route==='search')return search(q.get('q')||'');
   if(route==='coins'){const key=q.get('kind')==='directory'?'binance-directory':'binance-turnover';try{return await resource(key)}catch(e){if(fallback)return json(new URL(path,apiBase),120000);throw e}}
@@ -74,4 +80,5 @@ window.HongData=(()=>{
  function asset(name){return new URL(name,base).href}
  return {api,clear,aggregate,asset,staticMode,setFallback,get fallback(){return fallback},manifest,binanceBars};
 })();
+
 

@@ -48,13 +48,13 @@ def history():
 @app.get('/api/intraday')
 def intraday():
     interval=request.args.get('interval','1m')
-    if interval not in ('1m','5m','15m'):return jsonify(error='지원하지 않는 분봉'),400
+    if interval not in ('1m','5m','15m','1h','4h'):return jsonify(error='지원하지 않는 분봉'),400
     try:symbol=providers.resolve(request.args.get('symbol','')[:40])
     except ValueError as e:return jsonify(error=str(e)),400
     try:return jsonify(intraday_provider.intraday_history(symbol,interval))
     except Exception:
         try:
-            name=('data-intraday'+interval[:-1]+'-' if interval in ('5m','15m') else 'data-intraday-')+symbol.replace(':','-')+'.json'
+            name=('data-intraday'+interval+'-' if interval in ('1h','4h') else 'data-intraday'+interval[:-1]+'-' if interval in ('5m','15m') else 'data-intraday-')+symbol.replace(':','-')+'.json'
             response=providers.SESSION.get('https://jho971031-cloud.github.io/Hongpick/'+name,timeout=12);response.raise_for_status();data=response.json()
             if not data.get('candles'):raise ValueError('분봉 없음')
             return jsonify(data)
@@ -133,5 +133,6 @@ def files(name):
     if name.startswith('api/'):return jsonify(error='API not found'),404
     return send_from_directory(BASE,'index.html')
 if __name__=='__main__':app.run(host='0.0.0.0',port=int(os.environ.get('PORT',5000)))
+
 
 

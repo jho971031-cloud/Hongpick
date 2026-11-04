@@ -1,6 +1,6 @@
 /* Public Binance Spot market streams. No account, secrets or order endpoints. */
 window.HongLive=(()=>{
- const frame={D:'1d',W:'1w',M:'1M','1m':'1m','5m':'5m','15m':'15m'};
+ const frame={D:'1d',W:'1w',M:'1M','1m':'1m','5m':'5m','15m':'15m','1h':'1h','4h':'4h'};
  const clients=new Set();
  function ticker(x){
   if(!['24hrTicker','24hrMiniTicker'].includes(x?.e)||!String(x.s).endsWith('USDT'))return null;
@@ -10,7 +10,7 @@ window.HongLive=(()=>{
  }
  function candle(x,interval){
   const k=x?.k;if(x?.e!=='kline'||k?.i!==frame[interval]||!k.s?.endsWith('USDT')||Math.abs(Date.now()-Number(x.E))>60000)return null;
-  const row={time:interval.endsWith('m')?Math.floor(k.t/1000):new Date(k.t).toISOString().slice(0,10),open:Number(k.o),high:Number(k.h),low:Number(k.l),close:Number(k.c),volume:Number(k.v)};
+  const row={time:/^(?:1m|5m|15m|1h|4h)$/.test(interval)?Math.floor(k.t/1000):new Date(k.t).toISOString().slice(0,10),open:Number(k.o),high:Number(k.h),low:Number(k.l),close:Number(k.c),volume:Number(k.v)};
   if(![row.open,row.high,row.low,row.close,row.volume].every(Number.isFinite)||row.low<=0||row.volume<0||row.high<Math.max(row.open,row.close,row.low)||row.low>Math.min(row.open,row.close))return null;
   return {row,closed:k.x===true,updated:new Date(x.E).toISOString(),symbol:k.s};
  }
@@ -32,3 +32,4 @@ window.HongLive=(()=>{
  window.addEventListener('offline',()=>clients.forEach(c=>c.pause()));window.addEventListener('online',()=>clients.forEach(c=>c.resume()));
  return {subscribe,ticker,candle,frame};
 })();
+
