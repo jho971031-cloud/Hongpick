@@ -17,7 +17,7 @@ async function api(path){
  return HongData.api(path);
 }
 let chartScripts;
-function ensureCharts(){if(!chartScripts)chartScripts=(async()=>{for(const name of ['fib-client.js?v=6.4.2','lightweight-charts.js','scenario.js?v=6.9.0','charts.js?v=6.9.5','levels.js?v=6.9.0'])await new Promise((resolve,reject)=>{const script=document.createElement('script');script.src=HongData.asset(name);script.onload=resolve;script.onerror=()=>{script.remove();reject(Error('차트 모듈을 불러오지 못했습니다.'))};document.head.append(script)})})().catch(error=>{chartScripts=null;throw error});return chartScripts}
+function ensureCharts(){if(!chartScripts)chartScripts=(async()=>{for(const name of ['fib-client.js?v=6.4.2','lightweight-charts.js','scenario.js?v=6.9.0','charts.js?v=6.9.6','levels.js?v=6.9.0'])await new Promise((resolve,reject)=>{const script=document.createElement('script');script.src=HongData.asset(name);script.onload=resolve;script.onerror=()=>{script.remove();reject(Error('차트 모듈을 불러오지 못했습니다.'))};document.head.append(script)})})().catch(error=>{chartScripts=null;throw error});return chartScripts}
 function notice(root,text){root.innerHTML='<div class="empty">'+escapeHtml(text)+'</div>'}
 function source(d){return `${d.source||''}${d.kind||/13F|OGE|CNN|Fear|Alternative/.test(d.source||'')?'':' · 지연·주기 수집'} · 기준시각 ${formatDate(d.updated)}${d.stale?' · 이전 데이터':''}`}
 const pages=['menu','hongpicks','codexpicks','home','search','coins','gurus','turnover','fng','trump','watchlist'];
@@ -219,7 +219,7 @@ document.addEventListener('click',e=>{const button=e.target.closest('[data-pick-
 document.querySelector('.brand').addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();show('home')}});
 
 
-setInterval(()=>{if(document.hidden||document.querySelector('.modal-back'))return;for(const c of Object.values(charts)){const bucket=Math.floor(Date.now()/(parseInt(c.options.fibFrame)*60000||900000));if(['5m','15m'].includes(c.options.fibFrame)&&!c.expandedTool&&c.options.fib!=='off'&&(c.fullscreenState||c.element.closest('.page.active'))&&c.lastScalpRefreshBucket!==bucket){c.lastScalpRefreshBucket=bucket;c.refreshScalp()}}},60000);
+setInterval(()=>{if(document.hidden||document.querySelector('.modal-back'))return;for(const c of Object.values(charts)){const bucket=Math.floor(Date.now()/(parseInt(c.options.fibFrame)*60000||900000));if(['5m','15m','60m'].includes(c.options.fibFrame)&&!c.expandedTool&&c.options.fib!=='off'&&(c.fullscreenState||c.element.closest('.page.active'))&&c.lastScalpRefreshBucket!==bucket){c.lastScalpRefreshBucket=bucket;c.refreshScalp()}}},60000);
 
 $('picksEntryOnly').onchange=e=>{picksEntryOnly=e.target.checked;renderPicks()};document.addEventListener('click',e=>{if(e.target.closest('[data-show-entries]')){picksEntryOnly=true;$('picksEntryOnly').checked=true;show('hongpicks');renderPicks()}});
 $('picksOversold').onchange=e=>{picksOversold=e.target.checked;renderPicks()};
