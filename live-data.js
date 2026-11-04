@@ -1,6 +1,6 @@
 /* Public Binance Spot market streams. No account, secrets or order endpoints. */
 window.HongLive=(()=>{
- const frame={D:'1d',W:'1w',M:'1M','1m':'1m','5m':'5m','15m':'15m'};
+ const frame={D:'1d',W:'1w',M:'1M','1m':'1m','5m':'5m','15m':'15m','60m':'1h'};
  const clients=new Set();
  function ticker(x){
   if(!['24hrTicker','24hrMiniTicker'].includes(x?.e)||!String(x.s).endsWith('USDT'))return null;
