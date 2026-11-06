@@ -32,6 +32,7 @@ jobs:
           node test_live_data.js
           node test_weekly_scale.js
           node test_hourly.js
+          node test_channel_watch.js
           python -m unittest -v test_intraday_hours.py
       - uses: actions/cache@v4
         with:
