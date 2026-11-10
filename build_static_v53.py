@@ -49,6 +49,13 @@ def build(output,refresh=False,cache_dir=None):
         (output/'data-codexpicks.json').write_text(json.dumps({'error':'Codex 픽 데이터 없음 · 다음 수집에서 다시 시도합니다.','source':'Hong Pick'}),encoding='utf-8')
     manifest['resources']['codexpicks']='data-codexpicks.json'
     path.write_text(json.dumps(manifest,ensure_ascii=False,separators=(',',':')),encoding='utf-8')
+    try:
+        subprocess.run(['node',str(Path(__file__).resolve().parent/'rank_absorption.js'),str(output)],check=True,timeout=60)
+    except (OSError,subprocess.SubprocessError):
+        manifest.setdefault('failures',[]).append('absorption')
+        (output/'data-absorption.json').write_text(json.dumps({'error':'저점 거래량 탐색 데이터 없음','source':'Hong Pick'}),encoding='utf-8')
+    manifest['resources']['absorption']='data-absorption.json'
+    path.write_text(json.dumps(manifest,ensure_ascii=False,separators=(',',':')),encoding='utf-8')
     return manifest
 
 if __name__=='__main__':

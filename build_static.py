@@ -7,7 +7,7 @@ import providers as p
 import disclosures as d
 
 BASE=Path(__file__).resolve().parent
-ASSETS=('index.html','style.css','app.js','data-client.js','charts.js','channel-watch.js','levels.js','scenario.js','live-data.js','lightweight-charts.js','LICENSE-lightweight-charts.txt','manifest.json','responsive-check.html')
+ASSETS=('index.html','style.css','app.js','absorption-ui.js','data-client.js','charts.js','channel-watch.js','levels.js','scenario.js','live-data.js','lightweight-charts.js','LICENSE-lightweight-charts.txt','manifest.json','responsive-check.html')
 
 def read(name):return json.loads((BASE/name).read_text())
 
@@ -60,7 +60,7 @@ def build(output,refresh=False,cache_dir=None):
     selected.update(x['tv'] for inv in investors for x in inv.get('holdings',[])[:10] if x.get('tv'))
     selected.update(x['tv'] for x in trump.get('rows',[]) if x.get('tv'))
     selected.update(('KRX:005930','KRX:000660','NASDAQ:NVDA','NASDAQ:AAPL','NASDAQ:TSLA','NYSE:IBM','AMEX:SPY'))
-    selected.update(('NYSE:GS','NASDAQ:RGTI'))
+    selected.update(('NYSE:GS','NASDAQ:RGTI','AMEX:SOXL'))
     coin_directory=collect('binance-directory',p.coins.directory,'data-binance-directory.json')
     coin_turnover=collect('binance-turnover',p.coins.tickers,'data-binance-turnover.json')
     selected.update(x['tv'] for x in coin_turnover.get('rows',[])[:50])

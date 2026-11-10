@@ -102,6 +102,15 @@ def codexpicks():
         return data
     try:return jsonify(providers.cached('codexpicks-v2',900,load))
     except Exception:return fail('Codex 픽 실제 데이터 없음 · 다른 메뉴는 계속 사용할 수 있습니다.','Hong Pick collected OHLCV')
+@app.get('/api/absorption')
+def absorption():
+    def load():
+        response=providers.SESSION.get('https://jho971031-cloud.github.io/Hongpick/data-absorption.json',timeout=12)
+        response.raise_for_status();data=response.json()
+        if data.get('error') or not isinstance(data.get('rows'),list):raise ValueError('흡수 후보 데이터 없음')
+        return data
+    try:return jsonify(providers.cached('absorption-v1',900,load))
+    except Exception:return fail('저점 거래량 탐색 데이터 없음 · 다음 수집에서 다시 시도합니다.','Hong Pick weekly OHLCV')
 @app.get('/api/overview')
 def overview():return jsonify(providers.overview())
 @app.get('/api/gurus')
@@ -126,7 +135,7 @@ def health():return jsonify(status='ok',version='6.9.4')
 def home():return send_from_directory(BASE,'index.html')
 @app.get('/<path:name>')
 def files(name):
-    if name in ['app.js','live-data.js','data-client.js','fib-client.js','charts.js','channel-watch.js','levels.js','scenario.js','style.css','manifest.json','lightweight-charts.js','LICENSE-lightweight-charts.txt','responsive-check.html']:return send_from_directory(BASE,name)
+    if name in ['absorption-ui.js','app.js','live-data.js','data-client.js','fib-client.js','charts.js','channel-watch.js','levels.js','scenario.js','style.css','manifest.json','lightweight-charts.js','LICENSE-lightweight-charts.txt','responsive-check.html']:return send_from_directory(BASE,name)
     if re.fullmatch(r'data-[A-Za-z0-9-]+\.json',name):
         public=BASE/'public'
         return send_from_directory(public if (public/name).exists() else BASE,name)
