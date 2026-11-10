@@ -2,7 +2,8 @@
 from flask import Flask, jsonify, request, send_from_directory
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
-import os, re
+import os, re, json
+from datetime import datetime, timezone, timedelta
 import providers, disclosures, fib_provider, intraday_provider
 app=Flask(__name__,static_folder=None)
 BASE=Path(__file__).resolve().parent
@@ -110,7 +111,15 @@ def absorption():
         if data.get('error') or not isinstance(data.get('rows'),list):raise ValueError('흡수 후보 데이터 없음')
         return data
     try:return jsonify(providers.cached('absorption-v1',900,load))
-    except Exception:return fail('저점 거래량 탐색 데이터 없음 · 다음 수집에서 다시 시도합니다.','Hong Pick weekly OHLCV')
+    except Exception:
+        # Temporary bootstrap data is accepted only for 24 hours, and retains its actual collection time.
+        try:
+            data=json.loads((BASE/'absorption-seed.json').read_text(encoding='utf-8'))
+            generated=datetime.fromisoformat(data['generatedAt'].replace('Z','+00:00'))
+            age=datetime.now(timezone.utc)-generated
+            if timedelta(0)<=age<=timedelta(hours=24) and isinstance(data.get('rows'),list):return jsonify(data)
+        except (OSError, ValueError, KeyError, TypeError):pass
+        return fail('저점 거래량 탐색 데이터 없음 · 다음 수집에서 다시 시도합니다.','Hong Pick weekly OHLCV')
 @app.get('/api/overview')
 def overview():return jsonify(providers.overview())
 @app.get('/api/gurus')
