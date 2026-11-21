@@ -122,8 +122,35 @@ def absorption():
         return fail('저점 거래량 탐색 데이터 없음 · 다음 수집에서 다시 시도합니다.','Hong Pick weekly OHLCV')
 @app.get('/api/overview')
 def overview():return jsonify(providers.overview())
+def load_guru_snapshot():
+    # The scheduled Pages collector can reach EDGAR even when the web host cannot.
+    response=providers.SESSION.get('https://jho971031-cloud.github.io/Hongpick/data-gurus.json',timeout=8)
+    response.raise_for_status()
+    data=response.json()
+    expected={cik for cik,_,_ in disclosures.INVESTORS}
+    rows=data.get('rows')
+    if (data.get('source')!='SEC EDGAR 13F-HR' or not isinstance(rows,list)
+        or len(rows)!=len(expected) or {row.get('cik') for row in rows}!=expected
+        or any(row.get('error') or row.get('stale') or not row.get('quarter')
+               or not row.get('updated') or not row.get('holdings') for row in rows)
+        or not isinstance(data.get('consensus'),list)):
+        raise ValueError('Incomplete or stale SEC collection')
+    stamp=datetime.fromisoformat(data['updated'])
+    age=datetime.now(timezone.utc)-stamp
+    if not timedelta(0)<=age<=timedelta(hours=24):
+        raise ValueError('SEC collection is out of date')
+    return data
+
 @app.get('/api/gurus')
-def gurus():return jsonify(disclosures.gurus())
+def gurus():
+    try:data=providers.cached('gurus-pages-v1',300,load_guru_snapshot)
+    except Exception:data=disclosures.gurus()
+    rows=data.get('rows',[])
+    if data.get('stale'):
+        for row in rows:row['stale']=True
+    # Report the underlying collection time, even if this response was just assembled.
+    data['updated']=max((row['updated'] for row in rows if row.get('updated')),default=None)
+    return jsonify(data)
 @app.get('/api/trump')
 def trump():
     try:return jsonify(disclosures.trump())

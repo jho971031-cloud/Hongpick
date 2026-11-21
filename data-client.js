@@ -68,7 +68,7 @@ window.HongData=(()=>{
    if(staticMode&&!fallback)throw Error('이 시간봉은 API 보완을 켜야 볼 수 있습니다.');
    return json(new URL('/api/intraday?symbol='+encodeURIComponent(symbol)+'&interval='+interval,apiBase),10000);
   }
-  if(!staticMode){if(route==='history'){const dailyPath='/api/history?symbol='+encodeURIComponent(q.get('symbol'))+'&interval=D';return aggregate(await json(new URL(dailyPath,apiBase),900000),q.get('interval')||'D')}return json(new URL(path,apiBase),['gurus','trump'].includes(route)?3600000:90000)}
+  if(!staticMode){if(route==='history'){const dailyPath='/api/history?symbol='+encodeURIComponent(q.get('symbol'))+'&interval=D';return aggregate(await json(new URL(dailyPath,apiBase),900000),q.get('interval')||'D')}return json(new URL(path,apiBase),route==='gurus'?300000:route==='trump'?3600000:90000)}
   if(route==='search')return search(q.get('q')||'');
   if(route==='coins'){const key=q.get('kind')==='directory'?'binance-directory':'binance-turnover';try{return await resource(key)}catch(e){if(fallback)return json(new URL(path,apiBase),120000);throw e}}
   if(route==='history')return aggregate(await daily(q.get('symbol')),q.get('interval')||'D');
