@@ -39,11 +39,45 @@ def stock():
     try:return jsonify(providers.stock(providers.resolve(request.args.get('symbol','')[:40])))
     except ValueError as e:return jsonify(error=str(e)),400
     except Exception:return fail('시세 제공원 연결 오류 · 데이터 없음','TradingView Screener')
+def history_last_bar(data):
+    if data.get('interval')!='D' or len(data.get('candles',[]))<2:
+        raise ValueError('Missing daily chart bars')
+    return datetime.fromisoformat(data['candles'][-1]['time']).date()
+
+def display_daily_history(tv):
+    if tv.startswith(('BINANCE:','CRYPTO:')):
+        return providers.history(tv,'D')
+    today=datetime.now(timezone.utc).date()
+    snapshot=None
+    if re.fullmatch(r'[A-Z0-9]+:[A-Z0-9.\-]+',tv):
+        def load():
+            filename='data-history-'+tv.replace(':','-')+'.json'
+            response=providers.SESSION.get('https://jho971031-cloud.github.io/Hongpick/'+filename,timeout=5)
+            response.raise_for_status()
+            data=response.json()
+            if history_last_bar(data)>today:raise ValueError('Future daily chart bars')
+            return data
+        try:snapshot=providers.cached('chart-pages-v1:'+tv,300,load)
+        except Exception:pass
+    if snapshot and today-history_last_bar(snapshot)<=timedelta(days=3) and not snapshot.get('stale'):
+        return snapshot
+    try:
+        live=providers.history(tv,'D')
+        bar=history_last_bar(live)
+        if bar>today:raise ValueError('Future daily chart bars')
+        if not snapshot or (bar,not live.get('stale')) >= (history_last_bar(snapshot),not snapshot.get('stale')):
+            return dict(live,stale=True) if today-bar>timedelta(days=4) else live
+    except Exception:
+        if not snapshot:raise
+    return dict(snapshot,stale=True)
+
 @app.get('/api/history')
 def history():
     interval=request.args.get('interval','D')
     if interval not in ['D','W','M']:return jsonify(error='지원하지 않는 주기'),400
-    try:return jsonify(providers.history(providers.resolve(request.args.get('symbol','')[:40]),interval))
+    try:
+        tv=providers.resolve(request.args.get('symbol','')[:40])
+        return jsonify(providers.aggregate_history(display_daily_history(tv),interval))
     except ValueError as e:return jsonify(error=str(e)),400
     except Exception:return fail('일봉 제공원 연결 오류 · 차트 데이터 없음','NAVER Finance / Yahoo Finance')
 @app.get('/api/intraday')

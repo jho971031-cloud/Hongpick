@@ -165,7 +165,7 @@ window.HongChart=class {
    selected=reference;selectedFrame=frame;candidate=found;break;
   }catch(error){reason=basisLabel(frame)+' 데이터 없음';if(this.options.fibFrame!=='AUTO')break}}
  }
- if(token!==this.token)return;if(wantsFib&&!scalp)this.channelSelection={key:selectionKey,reference:selected,frame:selectedFrame,candidate,reason};this.data=interval==='W'&&selectedFrame==='W'?selected:viewing;this.referenceData=selected;this.fibBasis=selectedFrame;this.selectedCandidate=candidate;this.fibReason=reason;this.draw();this.renderControls();this.startLive();
+ if(token!==this.token)return;if(wantsFib&&!scalp)this.channelSelection={key:selectionKey,reference:selected,frame:selectedFrame,candidate,reason};this.data=viewing;this.referenceData=selected;this.fibBasis=selectedFrame;this.selectedCandidate=candidate;this.fibReason=reason;this.draw();this.renderControls();this.startLive();
 
  }catch(e){if(token!==this.token)return;this.element.innerHTML='<div class="chart-unavailable"><b>차트 데이터 없음</b><p>'+escapeHtml(e.message)+'</p></div>';this.renderControls()}}
 

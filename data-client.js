@@ -53,10 +53,12 @@ window.HongData=(()=>{
  function db(){return new Promise(resolve=>{if(!window.indexedDB){resolve(null);return}const request=indexedDB.open('hongpick.history.v1',1);request.onupgradeneeded=()=>request.result.createObjectStore('histories',{keyPath:'tv'});request.onsuccess=()=>resolve(request.result);request.onerror=()=>resolve(null)})}
  async function saved(tv,data){try{const database=await db();if(!database)return null;return await new Promise(resolve=>{const tx=database.transaction('histories',data?'readwrite':'readonly'),store=tx.objectStore('histories');if(data){store.put({tv,data,used:Date.now()});const all=store.getAll();all.onsuccess=()=>all.result.sort((a,b)=>b.used-a.used).slice(20).forEach(x=>store.delete(x.tv));tx.oncomplete=()=>{database.close();resolve(data)}}else{const get=store.get(tv);get.onsuccess=()=>resolve(get.result?.data||null);tx.oncomplete=()=>database.close()}tx.onerror=()=>{database.close();resolve(null)}})}catch{return null}}
  async function daily(tv){
-  let staticError;
-  try{const m=await manifest(),record=m.histories[tv];if(record)return await file(record.file)}catch(error){staticError=error}
-  if(fallback){try{const d=tv.startsWith('BINANCE:')?await binanceBars(tv):await json(new URL('/api/history?symbol='+encodeURIComponent(tv)+'&interval=D',apiBase));await saved(tv,d);return d}catch(error){const prior=await saved(tv);if(prior)return {...prior,stale:true,notice:'이 브라우저에 저장된 마지막 실제 일봉'};throw error}}
-  const prior=await saved(tv);if(prior)return {...prior,stale:true,notice:'이 브라우저에 저장된 마지막 실제 일봉'};
+  let staticError,priorSnapshot;
+  const last=d=>d?.candles?.at(-1)?.time||'';
+  const current=d=>!d.stale&&Date.now()-Date.parse(last(d)+'T00:00:00Z')<=4*86400000;
+  try{const m=await manifest(),record=m.histories[tv];if(record){const d=await file(record.file);if(current(d))return d;if(last(d))priorSnapshot=d}}catch(error){staticError=error}
+  if(fallback){try{const d=tv.startsWith('BINANCE:')?await binanceBars(tv):await json(new URL('/api/history?symbol='+encodeURIComponent(tv)+'&interval=D',apiBase));if(priorSnapshot&&last(priorSnapshot)>last(d))return {...priorSnapshot,stale:true};await saved(tv,d);return d}catch(error){staticError=error}}
+  const prior=await saved(tv),best=last(prior)>last(priorSnapshot)?prior:priorSnapshot;if(best)return {...best,stale:true,notice:'마지막 수집 실제 일봉 · 최신 봉 확인 불가'};
   throw staticError||Error('아직 수집하지 않은 종목입니다. 미수집 종목 API 보완을 켜거나 다음 수집을 기다려 주세요.');
  }
  async function api(path){
