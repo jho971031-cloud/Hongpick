@@ -145,7 +145,19 @@ const channelRatios=options=>[0,...(options.fibExtras?.has(.5)?[.5]:[]),1,...(op
 class FibonacciBands {
  constructor(candles,candidate,priceAt,ratios){this.priceAt=priceAt;this.candles=candles;this.candidate=candidate;this.ratios=ratios;this.rows=[];this.colors=['rgba(82,189,88,.07)','rgba(255,81,91,.07)','rgba(0,169,141,.07)','rgba(255,173,22,.07)','rgba(0,189,217,.07)','rgba(146,152,159,.06)'];this.view={zOrder:()=> 'bottom',renderer:()=>({draw:target=>target.useMediaCoordinateSpace(({context:ctx})=>{for(let i=1;i<this.rows.length;i++){const left=this.rows[i-1],right=this.rows[i];if(!left||!right)continue;for(let band=0;band<this.ratios.length-1;band++){ctx.fillStyle=this.colors[Math.round(this.ratios[band]*2)];ctx.beginPath();ctx.moveTo(left.x,left.y[band]);ctx.lineTo(right.x,right.y[band]);ctx.lineTo(right.x,right.y[band+1]);ctx.lineTo(left.x,left.y[band+1]);ctx.closePath();ctx.fill()}}})})}}
  attached({chart,series,requestUpdate}){this.chart=chart;this.series=series;this.requestUpdate=requestUpdate;requestUpdate()}
- updateAllViews(){const ratios=this.ratios;this.rows=[];for(let i=0;i<this.candles.length;i++){const x=this.chart.timeScale().timeToCoordinate(this.candles[i].time),y=ratios.map(r=>this.series.priceToCoordinate(this.priceAt(i,r)));this.rows.push(x==null||y.some(v=>v==null)?null:{x,y})}}
+ updateAllViews(){
+  const scale=this.chart.timeScale(),range=scale.getVisibleRange(),candles=this.candles,ratios=this.ratios;
+  this.rows=[];
+  if(!range||!candles.length)return;
+  const bound=(time,after)=>{let lo=0,hi=candles.length;const target=chartSeconds(time);while(lo<hi){const mid=(lo+hi)>>>1,t=chartSeconds(candles[mid].time);if(t<target||(after&&t===target))lo=mid+1;else hi=mid}return lo};
+  const first=Math.max(0,bound(range.from,false)-1),last=Math.min(candles.length,bound(range.to,true)+1);
+  for(let i=first;i<last;i++){
+   const x=scale.timeToCoordinate(candles[i].time);
+   if(x==null){this.rows.push(null);continue}
+   const y=ratios.map(r=>this.series.priceToCoordinate(this.priceAt(i,r)));
+   this.rows.push(y.some(v=>v==null)?null:{x,y});
+  }
+ }
  paneViews(){return[this.view]}
 }
 window.HongChart=class {
@@ -155,9 +167,23 @@ window.HongChart=class {
  const wantsFib=this.options.fib!=='off',interval=this.interval;
  const supportsFull=['D','W','M'].includes(interval)&&!/^(BINANCE|CRYPTO):/.test(item.tv)&&typeof HongData!=='undefined'&&typeof HongData.longHistory==='function';
  this.historyState=supportsFull?'loading':null;
- const full=supportsFull?HongData.longHistory(item.tv,interval).catch(()=>null):null;
- const getReference=async frame=>{const key=item.tv+':'+frame;if(!['5m','15m','1h','4h'].includes(frame)&&this.referenceCache.has(key))return this.referenceCache.get(key);const d=completedReference(['5m','15m','1h','4h'].includes(frame)&&viewing.interval===frame?viewing:await api((frame==='W'?'/api/fib-history?symbol=':'/api/history?symbol=')+encodeURIComponent(item.tv)+(frame==='W'?'':'&interval='+frame)),frame);if(!['5m','15m','1h','4h'].includes(frame))this.referenceCache.set(key,d);return d};
- const viewing=await api('/api/history?symbol='+encodeURIComponent(item.tv)+'&interval='+interval).catch(async error=>{const alternate=await full;if(!alternate)throw error;return alternate});if(token!==this.token)return;
+ let full=null;
+ const loadFull=()=>full??=HongData.longHistory(item.tv,interval).catch(()=>null);
+ const getReference=async frame=>{const key=item.tv+':'+frame;if(!['5m','15m','1h','4h'].includes(frame)&&this.referenceCache.has(key))return this.referenceCache.get(key);const d=completedReference((frame==='D'||['5m','15m','1h','4h'].includes(frame))&&viewing.interval===frame?viewing:await api((frame==='W'?'/api/fib-history?symbol=':'/api/history?symbol=')+encodeURIComponent(item.tv)+(frame==='W'?'':'&interval='+frame)),frame);if(!['5m','15m','1h','4h'].includes(frame))this.referenceCache.set(key,d);return d};
+ const viewing=await api('/api/history?symbol='+encodeURIComponent(item.tv)+'&interval='+interval).catch(async error=>{const alternate=supportsFull?await loadFull():null;if(!alternate)throw error;return alternate});if(token!==this.token)return;
+ if(supportsFull){
+  this.data=viewing;this.referenceData=null;this.fibBasis=null;this.selectedCandidate=null;this.fibReason='';
+  this.draw();
+  // Let the recent chart paint before starting large downloads and extra indicators.
+  await new Promise(resolve=>{
+   let settled=false,timer;
+   const done=()=>{if(!settled){settled=true;clearTimeout(timer);resolve()}};
+   timer=setTimeout(done,120);
+   if(typeof requestAnimationFrame==='function')requestAnimationFrame(()=>requestAnimationFrame(done));
+  });
+  if(token!==this.token)return;
+  loadFull();
+ }
  let selected=null,selectedFrame=null,candidate=null,reason='';
  const scalp=['5m','15m','1h','4h'].includes(this.options.fibFrame),selectionKey=item.tv+':'+this.options.fib+':'+this.options.fibFrame;
  if(wantsFib&&!scalp&&this.channelSelection?.key===selectionKey){({reference:selected,frame:selectedFrame,candidate,reason}=this.channelSelection)}
@@ -168,7 +194,7 @@ window.HongChart=class {
    selected=reference;selectedFrame=frame;candidate=found;break;
   }catch(error){reason=basisLabel(frame)+' 데이터 없음';if(this.options.fibFrame!=='AUTO')break}}
  }
- if(token!==this.token)return;if(wantsFib&&!scalp)this.channelSelection={key:selectionKey,reference:selected,frame:selectedFrame,candidate,reason};this.data=viewing;this.referenceData=selected;this.fibBasis=selectedFrame;this.selectedCandidate=candidate;this.fibReason=reason;this.draw();this.renderControls();this.startLive();
+ if(token!==this.token)return;if(wantsFib&&!scalp)this.channelSelection={key:selectionKey,reference:selected,frame:selectedFrame,candidate,reason};this.data=viewing;this.referenceData=selected;this.fibBasis=selectedFrame;this.selectedCandidate=candidate;this.fibReason=reason;if(supportsFull&&this.chart){if(wantsFib)this.preserveViewport(()=>this.applyIndicators(),true)}else this.draw();this.startLive();
  if(full)void this.extendFullHistory(full,token,interval);
 
  }catch(e){if(token!==this.token)return;this.element.innerHTML='<div class="chart-unavailable"><b>차트 데이터 없음</b><p>'+escapeHtml(e.message)+'</p></div>';this.renderControls()}}
