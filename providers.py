@@ -146,7 +146,20 @@ def history(tv,interval='D',*,full=False):
             params={'interval':'1d'}
             if full:params.update(period1=-2208988800,period2=int(datetime.now(timezone.utc).timestamp())+86400)
             else:params['range']='2y'
-            r=SESSION.get('https://query1.finance.yahoo.com/v8/finance/chart/'+quote(provider_symbol(tv),safe=''),params=params,timeout=15);r.raise_for_status();d=r.json()['chart']['result'][0];z=d['indicators']['quote'][0]
+            if full:
+                error=None
+                for host in ('query1.finance.yahoo.com','query2.finance.yahoo.com'):
+                    try:
+                        r=SESSION.get('https://'+host+'/v8/finance/chart/'+quote(provider_symbol(tv),safe=''),params=params,timeout=10)
+                        r.raise_for_status()
+                        d=r.json()['chart']['result'][0]
+                        if d.get('meta',{}).get('dataGranularity')!='1d':raise ValueError('Full daily history unavailable')
+                        z=d['indicators']['quote'][0]
+                        break
+                    except Exception as e:error=e
+                else:raise error
+            else:
+                r=SESSION.get('https://query1.finance.yahoo.com/v8/finance/chart/'+quote(provider_symbol(tv),safe=''),params=params,timeout=15);r.raise_for_status();d=r.json()['chart']['result'][0];z=d['indicators']['quote'][0]
             if full and d.get('meta',{}).get('dataGranularity')!='1d':raise ValueError('Full daily history unavailable')
             for i,t in enumerate(d.get('timestamp',[])):
                 vals=[finite(z[k][i]) for k in ['open','high','low','close']]

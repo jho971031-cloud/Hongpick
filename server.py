@@ -81,6 +81,22 @@ def history():
         if scope not in ('recent','max'):return jsonify(error='지원하지 않는 기간'),400
         if scope=='max':
             if tv.startswith(('BINANCE:','CRYPTO:')):return jsonify(error='전체 기간은 주식 일봉·주봉·월봉에서 지원합니다.'),400
+            if re.fullmatch(r'[A-Z0-9]+:[A-Z0-9.-]+',tv):
+                def load_archive():
+                    name='data-full-history-'+tv.replace(':','-')+'.json'
+                    reply=providers.SESSION.get('https://jho971031-cloud.github.io/Hongpick/'+name,timeout=5)
+                    reply.raise_for_status()
+                    data=reply.json()
+                    last=history_last_bar(data)
+                    if (data.get('fullHistory') is not True
+                        or data['candles'][0]['time']!=data.get('firstBar')
+                        or (datetime.now(timezone.utc).date()-last).days not in range(5)):
+                        raise ValueError('Full history snapshot unavailable or old')
+                    return data
+                try:
+                    archive=providers.cached('full-chart-pages-v1:'+tv,300,load_archive)
+                    return jsonify(providers.aggregate_history(archive,interval))
+                except Exception:pass
             return jsonify(providers.history(tv,interval,full=True))
         return jsonify(providers.aggregate_history(display_daily_history(tv),interval))
     except ValueError as e:return jsonify(error=str(e)),400
