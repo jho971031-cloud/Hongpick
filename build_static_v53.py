@@ -4,7 +4,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from build_static import build as base_build
 import fib_provider as p
-import intraday_provider
+import intraday_provider, providers
 
 def build(output,refresh=False,cache_dir=None):
     output=Path(output);base_build(output,refresh,cache_dir)
@@ -21,6 +21,16 @@ def build(output,refresh=False,cache_dir=None):
                     (output/name).write_text(json.dumps(data,ensure_ascii=False,separators=(',',':')),encoding='utf-8')
                     manifest['fibHistories'][tv]={'file':name,'updated':data.get('updated'),'lastBar':data.get('lastBar')}
                 except Exception:manifest.setdefault('failures',[]).append('fib-history:'+tv)
+    manifest['fullHistories']={}
+    if refresh:
+        # Keep common default charts usable on Pages without a cold server start.
+        for tv in ('NASDAQ:NVDA','KRX:005930'):
+            try:
+                data=providers.history(tv,'D',full=True)
+                filename='data-full-history-'+tv.replace(':','-')+'.json'
+                (output/filename).write_text(json.dumps(data,ensure_ascii=False,separators=(',',':')),encoding='utf-8')
+                manifest['fullHistories'][tv]={'file':filename,'firstBar':data['firstBar'],'lastBar':data['lastBar']}
+            except Exception:manifest.setdefault('failures',[]).append('full-history:'+tv)
     for interval,key,prefix in [('1m','intradayHistories','data-intraday-'),('5m','intraday5Histories','data-intraday5-'),('15m','intraday15Histories','data-intraday15-')]:
         manifest[key]={}
         if refresh:

@@ -130,19 +130,24 @@ def stock(tv):
         return dict(item(rows[0]),source='TradingView Screener',updated=now(),method='지연 시세 · 거래대금은 현재가 × 거래량 추정값')
     return cached('quote:'+tv,90,load)
 
-def history(tv,interval='D'):
+def history(tv,interval='D',*,full=False):
     def load():
         if tv.startswith('BINANCE:'):return coins.history(tv,'D')
         ticker=tv.split(':',1)[1];candles=[]
         if tv.startswith('KRX:'):
-            start=(datetime.now(timezone.utc)-timedelta(days=780)).strftime('%Y%m%d');end=datetime.now(timezone.utc).strftime('%Y%m%d')
+            start='19000101' if full else (datetime.now(timezone.utc)-timedelta(days=780)).strftime('%Y%m%d');end=datetime.now(timezone.utc).strftime('%Y%m%d')
             r=SESSION.get('https://api.finance.naver.com/siseJson.naver',params={'symbol':ticker,'requestType':1,'startTime':start,'endTime':end,'timeframe':'day'},timeout=15);r.raise_for_status();rows=ast.literal_eval(r.text.strip())
             for x in rows[1:]:
                 if len(x)>=6 and all(isinstance(v,(int,float)) for v in x[1:6]):
                     candles.append({'time':datetime.strptime(str(x[0]),'%Y%m%d').date().isoformat(),'open':x[1],'high':x[2],'low':x[3],'close':x[4],'volume':x[5]})
             source='NAVER Finance daily OHLCV';source_url='https://finance.naver.com/item/main.naver?code='+ticker
         else:
-            r=SESSION.get('https://query1.finance.yahoo.com/v8/finance/chart/'+quote(provider_symbol(tv),safe=''),params={'range':'2y','interval':'1d'},timeout=15);r.raise_for_status();d=r.json()['chart']['result'][0];z=d['indicators']['quote'][0]
+            # Yahoo's range=max can silently return monthly bars; use explicit bounds.
+            params={'interval':'1d'}
+            if full:params.update(period1=-2208988800,period2=int(datetime.now(timezone.utc).timestamp())+86400)
+            else:params['range']='2y'
+            r=SESSION.get('https://query1.finance.yahoo.com/v8/finance/chart/'+quote(provider_symbol(tv),safe=''),params=params,timeout=15);r.raise_for_status();d=r.json()['chart']['result'][0];z=d['indicators']['quote'][0]
+            if full and d.get('meta',{}).get('dataGranularity')!='1d':raise ValueError('Full daily history unavailable')
             for i,t in enumerate(d.get('timestamp',[])):
                 vals=[finite(z[k][i]) for k in ['open','high','low','close']]
                 if all(v is not None for v in vals):candles.append(dict(zip(['open','high','low','close'],vals),time=datetime.fromtimestamp(t,timezone.utc).date().isoformat(),volume=finite(z['volume'][i]) or 0))
@@ -150,6 +155,9 @@ def history(tv,interval='D'):
         candles=sorted({x['time']:x for x in candles if x['close']>0}.values(),key=lambda x:x['time'])
         if len(candles)<2:raise ValueError('OHLCV unavailable')
         return {'candles':candles,'source':source,'sourceUrl':source_url,'updated':now(),'lastBar':candles[-1]['time'],'interval':'D','adjustment':'제공원 OHLCV 기준. 기업행사에 따라 제공원별 조정 방식이 다를 수 있습니다.'}
+    if full:
+        data=cached('history-full-daily-v1:'+tv,1800,load)
+        return aggregate_history(dict(data,fullHistory=True,firstBar=data['candles'][0]['time']),interval)
     data=cached('history-entry-v66:'+tv,int(os.getenv('HONGPICK_HISTORY_TTL','900')),load,'data-history-'+tv.replace(':','-')+'.json')
     return aggregate_history(data,interval)
 

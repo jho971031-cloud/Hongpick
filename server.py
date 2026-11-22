@@ -77,6 +77,11 @@ def history():
     if interval not in ['D','W','M']:return jsonify(error='지원하지 않는 주기'),400
     try:
         tv=providers.resolve(request.args.get('symbol','')[:40])
+        scope=request.args.get('range','recent')
+        if scope not in ('recent','max'):return jsonify(error='지원하지 않는 기간'),400
+        if scope=='max':
+            if tv.startswith(('BINANCE:','CRYPTO:')):return jsonify(error='전체 기간은 주식 일봉·주봉·월봉에서 지원합니다.'),400
+            return jsonify(providers.history(tv,interval,full=True))
         return jsonify(providers.aggregate_history(display_daily_history(tv),interval))
     except ValueError as e:return jsonify(error=str(e)),400
     except Exception:return fail('일봉 제공원 연결 오류 · 차트 데이터 없음','NAVER Finance / Yahoo Finance')

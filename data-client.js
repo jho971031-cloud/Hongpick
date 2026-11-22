@@ -61,6 +61,27 @@ window.HongData=(()=>{
   const prior=await saved(tv),best=last(prior)>last(priorSnapshot)?prior:priorSnapshot;if(best)return {...best,stale:true,notice:'마지막 수집 실제 일봉 · 최신 봉 확인 불가'};
   throw staticError||Error('아직 수집하지 않은 종목입니다. 미수집 종목 API 보완을 켜거나 다음 수집을 기다려 주세요.');
  }
+ async function longHistory(tv,interval){
+  const path='/api/history?symbol='+encodeURIComponent(tv)+'&interval=D&range=max';
+  const valid=d=>d?.fullHistory===true&&d.interval==='D'&&d.candles?.length>=2;
+  const calls=[];
+  if(!staticMode||fallback)calls.push(json(new URL(path,apiBase),1800000).then(d=>{if(!valid(d))throw Error('전체 일봉 없음');return d}));
+  if(staticMode)calls.push(manifest().then(m=>{
+   const r=m.fullHistories?.[tv];if(!r)throw Error('수집된 전체 일봉 없음');
+   return file(r.file);
+  }).then(d=>{if(!valid(d))throw Error('전체 일봉 없음');return d}));
+  const full=await Promise.any(calls),recent=await dailyForLong(tv).catch(()=>null);
+  const rows=full.candles,end=rows.at(-1),last=recent?.candles?.at(-1);
+  if(last&&last.time>end.time){
+   const same=recent.candles.find(x=>x.time===end.time);
+   if(!same||recent.source!==full.source||Math.abs(same.close/end.close-1)>.001)throw Error('전체 이력과 최신 봉을 연결하지 못했습니다.');
+   return aggregate({...full,candles:[...rows,...recent.candles.filter(x=>x.time>end.time)],lastBar:last.time,updated:recent.updated,stale:!!recent.stale},interval);
+  }
+  return aggregate(full,interval);
+ }
+ function dailyForLong(tv){
+  return staticMode?daily(tv):json(new URL('/api/history?symbol='+encodeURIComponent(tv)+'&interval=D',apiBase),900000);
+ }
  async function api(path){
   const url=new URL(path,location.origin),route=url.pathname.slice(5),q=url.searchParams;
   if(route==='coins'&&q.get('kind')==='search')return coinSearch(q.get('q')||'');
@@ -80,7 +101,7 @@ window.HongData=(()=>{
   return resource(key);
  }
  function asset(name){return new URL(name,base).href}
- return {api,clear,aggregate,asset,staticMode,setFallback,get fallback(){return fallback},manifest,binanceBars};
+ return {api,clear,aggregate,asset,staticMode,setFallback,get fallback(){return fallback},manifest,binanceBars,longHistory};
 })();
 
 

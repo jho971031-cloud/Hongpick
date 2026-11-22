@@ -153,8 +153,11 @@ window.HongChart=class {
  destroy(){this.absorptionMarkers=null;this.channelWatcher?.reset();this.channelWatchMarkers=null;this.channelWatchHistory=[];this.srSeq=(this.srSeq||0)+1;this.srLines=[];this.stopLive();if(this.chart)this.chart.remove();this.chart=null;this.series=[];this.indicatorSeries=new Map();this.cloud=null;this.fibCloud=null;this.fibMarkers=null;this.fibCandidate=null;this.candles=null;this.volume=null;}
  async load(item){this.scenarioRoot?.remove();this.scenarioRoot=null;this.scenarioEpoch=(this.scenarioEpoch||0)+1;if(this.srTv!==item.tv){this.srTv=item.tv;this.srState=HongLevels.read(item.tv);this.srDraft=null;this.srAuto=null;this.srMessage=''}this.srPicker=false;this.srSeq=(this.srSeq||0)+1;this.item=item;this.lastLive=null;this.liveMode='연결 대기';this.data=null;const token=++this.token;this.destroy();this.element.innerHTML='<div class="chart-unavailable">실제 가격 데이터를 불러오는 중…</div>';this.renderControls();try{
  const wantsFib=this.options.fib!=='off',interval=this.interval;
+ const supportsFull=['D','W','M'].includes(interval)&&!/^(BINANCE|CRYPTO):/.test(item.tv)&&typeof HongData!=='undefined'&&typeof HongData.longHistory==='function';
+ this.historyState=supportsFull?'loading':null;
+ const full=supportsFull?HongData.longHistory(item.tv,interval).catch(()=>null):null;
  const getReference=async frame=>{const key=item.tv+':'+frame;if(!['5m','15m','1h','4h'].includes(frame)&&this.referenceCache.has(key))return this.referenceCache.get(key);const d=completedReference(['5m','15m','1h','4h'].includes(frame)&&viewing.interval===frame?viewing:await api((frame==='W'?'/api/fib-history?symbol=':'/api/history?symbol=')+encodeURIComponent(item.tv)+(frame==='W'?'':'&interval='+frame)),frame);if(!['5m','15m','1h','4h'].includes(frame))this.referenceCache.set(key,d);return d};
- const viewing=await api('/api/history?symbol='+encodeURIComponent(item.tv)+'&interval='+interval);if(token!==this.token)return;
+ const viewing=await api('/api/history?symbol='+encodeURIComponent(item.tv)+'&interval='+interval).catch(async error=>{const alternate=await full;if(!alternate)throw error;return alternate});if(token!==this.token)return;
  let selected=null,selectedFrame=null,candidate=null,reason='';
  const scalp=['5m','15m','1h','4h'].includes(this.options.fibFrame),selectionKey=item.tv+':'+this.options.fib+':'+this.options.fibFrame;
  if(wantsFib&&!scalp&&this.channelSelection?.key===selectionKey){({reference:selected,frame:selectedFrame,candidate,reason}=this.channelSelection)}
@@ -166,8 +169,30 @@ window.HongChart=class {
   }catch(error){reason=basisLabel(frame)+' 데이터 없음';if(this.options.fibFrame!=='AUTO')break}}
  }
  if(token!==this.token)return;if(wantsFib&&!scalp)this.channelSelection={key:selectionKey,reference:selected,frame:selectedFrame,candidate,reason};this.data=viewing;this.referenceData=selected;this.fibBasis=selectedFrame;this.selectedCandidate=candidate;this.fibReason=reason;this.draw();this.renderControls();this.startLive();
+ if(full)void this.extendFullHistory(full,token,interval);
 
  }catch(e){if(token!==this.token)return;this.element.innerHTML='<div class="chart-unavailable"><b>차트 데이터 없음</b><p>'+escapeHtml(e.message)+'</p></div>';this.renderControls()}}
+
+ async extendFullHistory(pending,token,interval){
+  const full=await pending;
+  if(token!==this.token||interval!==this.interval||!this.chart||!this.data)return;
+  const rows=full?.candles,current=this.data.candles;
+  if(!rows?.length||chartSeconds(rows[0].time)>chartSeconds(current[0].time)||chartSeconds(rows.at(-1).time)<chartSeconds(current.at(-1).time)){
+   this.historyState='unavailable';this.renderControls();return;
+  }
+  this.historyState='ready';
+  try{
+   this.preserveViewport(()=>{
+    this.data=full;
+    this.candles.setData(rows.map(row=>({...row})));
+    this.volume.setData(rows.map(c=>({time:c.time,value:c.volume,color:c.close>=c.open?'#16d79b38':'#ff526d38'})));
+    this.applyIndicators();
+    this.drawAbsorptionEvent();
+   },true);
+  }catch{
+   this.historyState='unavailable';this.renderControls();
+  }
+ }
 
  stopLive(){this.channelWatcher?.reset();this.liveEpoch=(this.liveEpoch||0)+1;this.liveClient?.close();this.liveClient=null;clearTimeout(this.liveIndicatorTimer);this.liveIndicatorTimer=null;}
  startLive(){
@@ -302,6 +327,17 @@ window.HongChart=class {
  renderControls(){
   if(!this.item)return;if(this.fullscreenState)this.fullscreenState.root.querySelector('.chart-screen-toolbar b small').textContent=this.interval;const saved=state.watch.some(x=>x.tv===this.item.tv),fibLabel=this.options.fib==='high'?'고–고–고':this.options.fib==='low'?'저–저–저':'OFF';
   this.controls.innerHTML='<div class="indicator-buttons"><button data-tool="ma" class="'+(this.options.ma.size?'on':'')+'">이동평균선 '+[...this.options.ma].sort((a,b)=>a-b).join('/')+'</button><button data-tool="rsi" class="'+(this.options.rsi?'on':'')+'">RSI(14) '+(this.options.rsi?'ON':'OFF')+'</button><button data-tool="ichi" class="'+(this.options.ichi?'on':'')+'">일목균형표 '+(this.options.ichi?'ON':'OFF')+'</button><button data-tool="fib" class="'+(this.options.fib!=='off'?'on':'')+'">자동 빗각 '+fibLabel+(this.options.fib!=='off'?' · '+basisLabel(this.fibBasis||this.options.fibFrame):'')+'</button><button data-tool="scalp5" class="'+(this.options.fibFrame==='5m'&&this.options.fib!=='off'?'on':'')+'">5분 단타 빗각'+(this.options.fibFrame==='5m'&&this.options.fib!=='off'?' ON':' OFF')+'</button><button data-tool="scalp" class="'+(this.options.fibFrame==='15m'&&this.options.fib!=='off'?'on':'')+'">15분 단타 빗각'+(this.options.fibFrame==='15m'&&this.options.fib!=='off'?' ON':' OFF')+'</button><button data-tool="fib1h" class="'+(this.options.fibFrame==='1h'&&this.options.fib!=='off'?'on':'')+'">1시간 빗각'+(this.options.fibFrame==='1h'&&this.options.fib!=='off'?' ON':' OFF')+'</button><button data-tool="fib4h" class="'+(this.options.fibFrame==='4h'&&this.options.fib!=='off'?'on':'')+'">4시간 빗각'+(this.options.fibFrame==='4h'&&this.options.fib!=='off'?' ON':' OFF')+'</button><button data-tool="sr" class="'+(this.srState?.show&&(this.srState?.auto||this.srState?.manual.length)?'on':'')+'">지지·저항선</button>'+(this.item.tv.startsWith('BINANCE:')?'<button data-tool="channelwatch" class="'+(this.options.channelWatch?'on':'')+'">채널 감시 '+(this.options.channelWatch?'ON':'OFF')+'</button><button data-tool="channelnotify">브라우저 알림 허용</button>':'')+'<button data-tool="scenario" class="scenario-trigger">↗ 모의 진입 시나리오</button><button data-tool="fullscreen">⛶ 전체화면</button><button data-watch="'+escapeHtml(this.item.tv)+'" class="'+(saved?'on':'')+'">'+(saved?'★ 저장됨':'☆ 관심 저장')+'</button></div><div class="filters timeframe">'+['1m','5m','15m','1h','4h','D','W','M'].map((v,i)=>'<button data-interval="'+v+'" class="'+(v===this.interval?'sel':'')+'">'+['1분','5분','15분','1시간','4시간','일봉','주봉','월봉'][i]+'</button>').join('')+'</div><small class="data-source">'+(this.data?escapeHtml(this.data.source)+' · 마지막 봉 '+anchorTime(this.data.lastBar)+' · 수집 '+formatDate(this.data.updated)+(this.data.stale?' · 이전 데이터':''):'가격 데이터')+(this.item.tv.startsWith('BINANCE:')?' · '+escapeHtml(this.liveMode||'REST 수신 · 연결 대기')+(this.lastLive?' · 마지막 스트림 '+formatDate(this.lastLive):''):' · 지연·주기 수집 시세')+(this.data&&[...this.options.ma].some(p=>p>this.data.candles.length)?'<br>선택한 MA 중 봉 수가 부족한 기간은 데이터가 없습니다.':'')+(this.fibStatus?'<br><span class="fib-status">'+basisLabel(this.fibBasis||this.options.fibFrame)+' 기준 · 봉 전환 시 유지: '+escapeHtml(this.fibStatus)+'</span>':'')+(this.item.tv.startsWith('BINANCE:')&&this.options.channelWatch?'<br><span class="channel-watch-status" aria-live="polite">'+escapeHtml(this.channelWatchStatus||(this.options.fib==='off'?'채널 감시 대기 · 자동 빗각을 켜 주세요':this.lastLive?'채널 감시 중 · 약 3초 간격 · 홍픽 차트가 보이는 동안':'채널 감시 대기 · 실시간 시세 연결 중'))+'</span>':'')+'<br>일목: 9 / 26 / 52 / 26 · 구름 불투명도 30% · <a href="https://www.tradingview.com/" target="_blank" rel="noopener noreferrer">Chart by TradingView Lightweight Charts</a></small>';
+  if(this.historyState){
+   const bar=document.createElement('div');bar.className='filters';
+   if(this.historyState==='ready'){
+    const all=document.createElement('button');all.textContent='전체 기간 보기';
+    all.onclick=()=>{const rows=this.data?.candles;if(rows?.length)this.chart?.timeScale().setVisibleRange({from:rows[0].time,to:rows.at(-1).time})};
+    bar.append(all);
+   }
+   const note=document.createElement('small');note.className='data-source';
+   note.textContent=this.historyState==='ready'?'조회 가능: '+(this.data.firstBar||this.data.candles[0].time)+' ~ '+this.data.lastBar:this.historyState==='loading'?'과거 일봉을 추가로 불러오는 중…':'전체 기간을 불러오지 못해 현재 받은 범위만 표시 중';
+   bar.append(note);this.controls.append(bar);
+  }
   this.controls.querySelectorAll('[data-tool]').forEach(button=>button.onclick=()=>{const key=button.dataset.tool;if(key==='channelwatch'){this.options.channelWatch=!this.options.channelWatch;this.channelWatcher?.reset();this.channelWatchStatus=this.options.channelWatch?null:'채널 감시 중지';this.renderControls()}else if(key==='channelnotify')this.enableChannelNotification();else if(key==='sr')this.toggleLevels();else if(key==='scenario')this.openScenario();else if(key==='fullscreen')this.openFullscreen();else if(key==='ma')this.maMenu();else if(key==='fib')this.fibMenu();else if(key==='scalp')this.fibMenu('15m');else if(key==='scalp5')this.fibMenu('5m');else if(key==='fib1h')this.fibMenu('1h');else if(key==='fib4h')this.fibMenu('4h');else{this.options[key==='ichi'?'ichi':'rsi']=!this.options[key==='ichi'?'ichi':'rsi'];this.applyIndicators()}});
   this.renderSettings();if(this.expandedTool==='sr')this.renderLevelSettings();
   if(this.element.id==='coinChart'&&typeof paintCoinDeskFrame==='function')paintCoinDeskFrame(this);
